@@ -1,0 +1,112 @@
+services:
+
+  # ────────────────────────────────────────────────────────────
+  # MongoDB
+  # ────────────────────────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    container_name: no-preco-mongo
+    restart: unless-stopped
+
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Defina MONGO_ROOT_PASSWORD no .env}
+      MONGO_INITDB_DATABASE:      ${MONGO_DB:-no-preco}
+      # Passadas para o mongo-init.js
+      MONGO_APP_USER:             ${MONGO_APP_USER:-no_preco_user}
+      MONGO_APP_PASSWORD:         ${MONGO_APP_PASSWORD:?Defina MONGO_APP_PASSWORD no .env}
+
+    volumes:
+      # Persistência dos dados entre restarts e recriações do container
+      - mongo_data:/data/db
+      # Diretório de configuração do MongoDB
+      - mongo_config:/data/configdb
+      # Script de inicialização — executado só na primeira criação do volume
+      - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+
+    ports:
+      # Exponha apenas se precisar de acesso externo (ex: MongoDB Compass).
+      # Em produção, remova ou restrinja com firewall.
+      - "${MONGO_PORT:-27017}:27017"
+
+    networks:
+      - app_network
+
+    healthcheck:
+      test: >
+        mongosh --quiet --eval
+        "db.adminCommand('ping').ok"
+        --username ${MONGO_ROOT_USER:-admin}
+        --password ${MONGO_ROOT_PASSWORD:-changeme}
+        --authenticationDatabase admin
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ────────────────────────────────────────────────────────────
+  # API Node.js
+  # ────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    container_name: no-preco-api
+    restart: unless-stopped
+
+    environment:
+      NODE_ENV:         production
+      PORT:             ${PORT:-3000}
+      # Usa o usuário da aplicação (não o root do Mongo)
+      MONGODB_URI: >-
+        mongodb://${MONGO_APP_USER:-no_preco_user}:${MONGO_APP_PASSWORD:-no_preco_pass}@mongo:27017/${MONGO_DB:-no-preco}?authSource=${MONGO_DB:-no-preco}
+      COLETA_ATIVO:     ${COLETA_ATIVO:-true}
+      COLETA_MUNICIPIO: ${COLETA_MUNICIPIO:-Salvador}
+      COLETA_CRON:      ${COLETA_CRON:-0 * * * *}
+
+    ports:
+      - "${PORT:-3000}:3000"
+
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+    networks:
+      - app_network
+
+    healthcheck:
+      test: wget -qO- http://localhost:3000/ping || exit 1
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+# ────────────────────────────────────────────────────────────
+# Volumes nomeados — persistem além do ciclo de vida dos containers
+# ────────────────────────────────────────────────────────────
+volumes:
+  mongo_data:
+    driver: local
+  mongo_config:
+    driver: local
+
+# ────────────────────────────────────────────────────────────
+# Rede interna — containers se comunicam por nome de serviço
+# A porta do Mongo não precisa ser exposta externamente
+# ────────────────────────────────────────────────────────────
+networks:
+  app_network:
+    driver: bridge
