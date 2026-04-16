@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 import { AxiosError } from 'axios';
 import { createHttpClient } from '../../shared/http/axios-client';
 import { buildApiHeaders } from '../../shared/http/browser-headers';
+import { getBrowser } from '../../shared/http/browser-client';
 import { BuscaParams, ProdutoPreco, ResultadoBusca, ScraperError } from './scraper.types';
 
 const BASE_URL = 'https://precodahora.ba.gov.br';
@@ -9,7 +10,7 @@ const BASE_URL = 'https://precodahora.ba.gov.br';
 // Endpoints descobertos via DevTools — Network tab (XHR/Fetch)
 const ENDPOINTS = {
   // API JSON interna (prioridade 1 — mais limpa e rápida)
-  apiProdutos: '/produtos/pesquisa/',
+  apiProdutos: '/produtos/',
   // Fallback: página HTML com tabela de resultados
   htmlPesquisa: '/produtos/',
 } as const;
@@ -65,24 +66,32 @@ async function comRetry<T>(fn: () => Promise<T>, contexto: string): Promise<T> {
 
 async function buscarViaApi(params: BuscaParams): Promise<ProdutoPreco[]> {
   const url = ENDPOINTS.apiProdutos;
+  const { csrfToken, cookie } = await obterCredenciaisBusca();
+  const municipioId = params.municipioId ?? resolverMunicipioId(params.municipio);
 
   // A API do site usa "codmun" (código IBGE inteiro) para filtrar por município.
   // "municipio" (string) é usado apenas na estratégia HTML de fallback.
-  const queryParams: Record<string, unknown> = {
-    produto: params.termo,
-    pagina: params.pagina ?? 1,
+  const form = new URLSearchParams({
+    termo: params.termo,
+    pagina: String(params.pagina ?? 1),
     ordenar: 'preco.asc',
-    raio: 15,
-    horas: 48,
-  };
+    raio: '15',
+    horas: '48',
+  });
 
-  if (params.municipioId != null) {
-    queryParams['codmun'] = params.municipioId;
+  if (municipioId != null) {
+    form.set('codmun', String(municipioId));
   }
 
-  const response = await client.get<unknown>(url, {
-    params: queryParams,
-    headers: buildApiHeaders(BASE_URL + ENDPOINTS.htmlPesquisa),
+  const response = await client.post<unknown>(url, form, {
+    headers: {
+      ...buildApiHeaders(BASE_URL + ENDPOINTS.htmlPesquisa),
+      Accept: 'application/json, text/javascript, */*; q=0.01',
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-CSRFToken': csrfToken,
+      Cookie: cookie,
+    },
   });
 
   const data = response.data;
@@ -93,13 +102,36 @@ async function buscarViaApi(params: BuscaParams): Promise<ProdutoPreco[]> {
   }
 
   const raw = data as Record<string, unknown>;
-  const lista: unknown[] = (raw['results'] as unknown[]) ?? (raw['data'] as unknown[]) ?? [];
+  const lista: unknown[] =
+    (raw['resultado'] as unknown[]) ??
+    (raw['results'] as unknown[]) ??
+    (raw['data'] as unknown[]) ??
+    [];
 
   if (!Array.isArray(lista)) {
-    throw new Error(`Shape inesperado — campo "results"/"data" não é array. Keys: ${Object.keys(raw).join(', ')}`);
+    throw new Error(`Shape inesperado — lista de resultados não é array. Keys: ${Object.keys(raw).join(', ')}`);
   }
 
   return lista.map(normalizarItemApi);
+}
+
+async function obterCredenciaisBusca(): Promise<{ csrfToken: string; cookie: string }> {
+  const response = await client.get<string>(ENDPOINTS.htmlPesquisa, {
+    headers: buildApiHeaders(BASE_URL + ENDPOINTS.htmlPesquisa),
+    responseType: 'text',
+  });
+
+  const $ = cheerio.load(response.data);
+  const csrfToken = $('#validate').attr('data-id');
+  const cookie = (response.headers['set-cookie'] ?? [])
+    .map((value) => value.split(';')[0])
+    .join('; ');
+
+  if (!csrfToken || !cookie) {
+    throw new Error('Não foi possível obter token CSRF/cookies da página de busca');
+  }
+
+  return { csrfToken, cookie };
 }
 
 function normalizarItemApi(item: unknown): ProdutoPreco {
@@ -109,21 +141,45 @@ function normalizarItemApi(item: unknown): ProdutoPreco {
 
   const raw = item as Record<string, unknown>;
 
-  const preco = parsePreco(raw['preco'] ?? raw['vl_preco'] ?? raw['valor'] ?? 0);
+  const produtoRaw = isRecord(raw['produto']) ? raw['produto'] : raw;
+  const estabelecimentoRaw = isRecord(raw['estabelecimento']) ? raw['estabelecimento'] : raw;
+
+  const preco = parsePreco(
+    produtoRaw['precoUnitario'] ??
+    produtoRaw['precoLiquido'] ??
+    produtoRaw['precoBruto'] ??
+    raw['preco'] ??
+    raw['vl_preco'] ??
+    raw['valor'] ??
+    0,
+  );
 
   // O nome do município pode vir sob várias chaves dependendo da versão da API.
   // "localidade" é o nome observado no endpoint /municipios/ do próprio site.
   const municipioNome =
-    String(raw['municipio'] ?? raw['nm_municipio'] ?? raw['localidade'] ?? raw['cidade'] ?? '').trim() || undefined;
+    String(
+      estabelecimentoRaw['municipio'] ??
+      raw['municipio'] ??
+      raw['nm_municipio'] ??
+      raw['localidade'] ??
+      raw['cidade'] ??
+      '',
+    ).trim() || undefined;
 
   return {
-    nome: String(raw['produto'] ?? raw['nome'] ?? raw['ds_produto'] ?? '').trim(),
+    nome: String(produtoRaw['descricao'] ?? raw['nome'] ?? raw['ds_produto'] ?? '').trim(),
     preco,
-    mercado: String(raw['estabelecimento'] ?? raw['mercado'] ?? raw['nm_estabelecimento'] ?? '').trim(),
-    cnpj: formatarCnpj(String(raw['cnpj'] ?? raw['nu_cnpj'] ?? '')),
+    mercado: String(
+      estabelecimentoRaw['nomeEstabelecimento'] ??
+      raw['mercado'] ??
+      raw['nm_estabelecimento'] ??
+      '',
+    ).trim(),
+    cnpj: formatarCnpj(String(estabelecimentoRaw['cnpj'] ?? raw['cnpj'] ?? raw['nu_cnpj'] ?? '')),
+    cidade: municipioNome,
     municipio: municipioNome,
-    dataColeta: String(raw['data'] ?? raw['dt_coleta'] ?? '').trim() || undefined,
-    unidade: String(raw['unidade'] ?? raw['ds_unidade'] ?? '').trim() || undefined,
+    dataColeta: String(produtoRaw['data'] ?? raw['data'] ?? raw['dt_coleta'] ?? '').trim() || undefined,
+    unidade: String(produtoRaw['unidade'] ?? raw['unidade'] ?? raw['ds_unidade'] ?? '').trim() || undefined,
   };
 }
 
@@ -223,7 +279,79 @@ function parseHtml(html: string, termoBusca: string): ProdutoPreco[] {
 }
 
 // ─────────────────────────────────────────────
-// Orquestrador: API JSON → fallback HTML
+// Estratégia 3: Browser headless (Puppeteer)
+//
+// Resolve o challenge JS do site automaticamente:
+// 1. Abre uma Page no Chromium compartilhado
+// 2. Intercepta a resposta XHR de /produtos/pesquisa/ (JSON real)
+// 3. Se não capturar JSON, faz parse do HTML já renderizado pelo browser
+// ─────────────────────────────────────────────
+
+async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
+  const browser = await getBrowser();
+  const page = await browser.newPage();
+
+  try {
+    // Bloqueia recursos desnecessários para acelerar o carregamento
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      const tipo = req.resourceType();
+      if (['image', 'stylesheet', 'font', 'media'].includes(tipo)) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
+    // Captura a resposta do endpoint JSON interno quando o browser a receber
+    let dadosApi: unknown = null;
+    page.on('response', async (response) => {
+      if (response.url().includes('/produtos/pesquisa/') && dadosApi === null) {
+        try {
+          const contentType = response.headers()['content-type'] ?? '';
+          if (contentType.includes('json')) {
+            dadosApi = await response.json();
+          }
+        } catch {
+          // Resposta não era JSON — ignora
+        }
+      }
+    });
+
+    // Monta URL da busca com os parâmetros disponíveis
+    const url = new URL(`${BASE_URL}${ENDPOINTS.htmlPesquisa}`);
+    url.searchParams.set('q', params.termo);
+    if (params.municipio) url.searchParams.set('municipio', params.municipio);
+
+    // Navega até a página — o browser executa o challenge JS e dispara o XHR
+    await page.goto(url.toString(), {
+      waitUntil: 'networkidle2',
+      timeout: 45_000,
+    });
+
+    // Se o XHR foi capturado, normaliza com a mesma função da estratégia API
+    if (dadosApi !== null) {
+      const raw = dadosApi as Record<string, unknown>;
+      const lista: unknown[] =
+        (raw['resultado'] as unknown[]) ??
+        (raw['results'] as unknown[]) ??
+        (raw['data'] as unknown[]) ??
+        [];
+      if (Array.isArray(lista) && lista.length > 0) {
+        return lista.map(normalizarItemApi);
+      }
+    }
+
+    // Fallback: parse do HTML já renderizado pelo Chromium
+    const htmlRenderizado = await page.content();
+    return parseHtml(htmlRenderizado, params.termo);
+  } finally {
+    await page.close();
+  }
+}
+
+// ─────────────────────────────────────────────
+// Orquestrador: API JSON → fallback HTML → browser
 // ─────────────────────────────────────────────
 
 export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusca> {
@@ -254,13 +382,22 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
         () => buscarViaHtml(params),
         `HTML "${params.termo}"`,
       );
-    } catch (htmlErr) {
-      throw buildScraperError(
-        classificarErro(htmlErr),
-        'Ambas as estratégias falharam',
-        htmlErr,
-        ENDPOINTS.htmlPesquisa,
-      );
+    } catch {
+      // API e HTML falharam — usa browser headless como última opção
+    }
+
+    if (itens.length === 0) {
+      try {
+        estrategiaUsada = 'browser';
+        itens = await buscarViaBrowser(params);
+      } catch (browserErr) {
+        throw buildScraperError(
+          classificarErro(browserErr),
+          'Todas as estratégias falharam (axios API, axios HTML, browser)',
+          browserErr,
+          ENDPOINTS.htmlPesquisa,
+        );
+      }
     }
   }
 
@@ -303,6 +440,31 @@ function formatarCnpj(cnpj: string): string {
   const digits = cnpj.replace(/\D/g, '');
   if (digits.length !== 14) return cnpj;
   return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+}
+
+function resolverMunicipioId(municipio?: string): number | undefined {
+  if (!municipio) return undefined;
+
+  const municipios: Record<string, number> = {
+    salvador: 2927408,
+    'teixeira-de-freitas': 2931350,
+  };
+
+  return municipios[normalizarSlug(municipio)];
+}
+
+function normalizarSlug(valor: string): string {
+  return valor
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function classificarErro(err: unknown): ScraperError['tipo'] {

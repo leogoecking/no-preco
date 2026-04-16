@@ -1,6 +1,8 @@
+import 'dotenv/config';
 import app from './app';
 import { connectDatabase } from './shared/database/connection';
 import { workerScheduler } from './jobs/worker.scheduler';
+import { closeBrowser } from './shared/http/browser-client';
 import { Logger } from './shared/logger/logger';
 
 const PORT        = process.env['PORT'] ?? 3000;
@@ -19,6 +21,9 @@ async function bootstrap(): Promise<void> {
   }
 
   workerScheduler.registerShutdownHandlers();
+
+  process.once('SIGTERM', () => closeBrowser().catch(() => null));
+  process.once('SIGINT',  () => closeBrowser().catch(() => null));
 
   app.listen(PORT, () => {
     log.info('Servidor iniciado', { porta: PORT, coleta: COLETA_ATIVO });

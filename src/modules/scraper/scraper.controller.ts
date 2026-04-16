@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { precoRepository } from '../preco/preco.repository';
 
 // ─────────────────────────────────────────────
+// GET /buscar?produto=arroz&cidade=teixeira-de-freitas&dias=7&limite=50
 // GET /produtos/buscar?termo=arroz&municipio=Salvador&dias=7&limite=50
 //
 // Lê EXCLUSIVAMENTE do banco de dados.
@@ -10,13 +11,15 @@ import { precoRepository } from '../preco/preco.repository';
 // ─────────────────────────────────────────────
 
 export async function buscar(req: Request, res: Response): Promise<void> {
-  const termo = String(req.query['termo'] ?? '').trim();
+  const termo = String(req.query['produto'] ?? req.query['termo'] ?? '').trim();
+  const cidade = req.query['cidade'] ? String(req.query['cidade']).trim() : undefined;
   const municipio = req.query['municipio'] ? String(req.query['municipio']).trim() : undefined;
+  const cidadeFiltro = cidade ?? municipio;
   const dias = req.query['dias'] ? Number(req.query['dias']) : 7;
   const limite = req.query['limite'] ? Number(req.query['limite']) : 100;
 
   if (!termo) {
-    res.status(400).json({ erro: 'Parâmetro "termo" é obrigatório.' });
+    res.status(400).json({ erro: 'Parâmetro "produto" é obrigatório.' });
     return;
   }
 
@@ -31,11 +34,16 @@ export async function buscar(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    const itens = await precoRepository.buscarPorTermo(termo, { municipio, diasRecentes: dias, limite });
+    const itens = await precoRepository.buscarPorTermo(termo, {
+      cidade: cidadeFiltro,
+      diasRecentes: dias,
+      limite,
+    });
 
     res.status(200).json({
-      termo,
-      municipio,
+      produto: termo,
+      cidade: cidadeFiltro,
+      municipio: cidadeFiltro,
       diasConsultados: dias,
       totalItens: itens.length,
       // Informa explicitamente a origem dos dados para o frontend

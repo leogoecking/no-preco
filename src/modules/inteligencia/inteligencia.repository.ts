@@ -1,3 +1,4 @@
+import { PipelineStage } from 'mongoose';
 import { PrecoModel } from '../preco/preco.model';
 import {
   AlertaPreco,
@@ -32,7 +33,7 @@ export async function buscarEstatisticasSemana(
     amplitudeAbsoluta: number;
   };
 
-  const pipeline = [
+  const pipeline: PipelineStage[] = [
     { $match: match },
 
     // Garante que $first capture o dado mais recente
@@ -114,7 +115,7 @@ export async function buscarRankingVolatilidade(
 
   type RawVolatilidade = Omit<ProdutoVolatilidade, 'posicao' | 'nivel'>;
 
-  const pipeline = [
+  const pipeline: PipelineStage[] = [
     { $match: match },
 
     {
@@ -214,7 +215,7 @@ export async function buscarAlertasMinHistorico(
 
   type RawAlerta = AlertaPreco;
 
-  const pipeline = [
+  const pipeline: PipelineStage[] = [
     { $match: match },
 
     // DESC: garante que $first captura o preço mais recente

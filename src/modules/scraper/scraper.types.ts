@@ -4,6 +4,7 @@ export interface ProdutoPreco {
   preco: number;
   mercado: string;
   cnpj: string;
+  cidade?: string;
   municipio?: string;
   dataColeta?: string;
   unidade?: string;

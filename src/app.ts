@@ -13,6 +13,22 @@ app.use(express.json());
 // Rate limit geral — aplicado a todas as rotas
 app.use(limiterGeral);
 
+app.get('/', (_req, res) => {
+  res.json({
+    nome: 'no-preco-api',
+    status: 'online',
+    endpoints: {
+      health: '/ping',
+      buscarProdutos: '/buscar?produto=arroz&cidade=teixeira-de-freitas',
+      historicoProdutos: '/produtos/historico?termo=arroz',
+      coletaStatus: '/coleta/status',
+      estatisticas: '/inteligencia/estatisticas',
+      volatilidade: '/inteligencia/volatilidade',
+      alertas: '/inteligencia/alertas',
+    },
+  });
+});
+
 // Rotas
 app.use(healthRouter);
 app.use(scraperRouter);

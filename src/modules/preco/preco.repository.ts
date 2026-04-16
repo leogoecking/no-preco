@@ -8,12 +8,14 @@ import { ProdutoPreco } from '../scraper/scraper.types';
 export interface HistoricoOptions {
   dataInicio?: Date;
   dataFim?: Date;
+  cidade?: string;
   municipio?: string;
   /** Máximo de registros retornados (padrão: 100) */
   limite?: number;
 }
 
 export interface BuscaTermoOptions {
+  cidade?: string;
   municipio?: string;
   /** Apenas preços coletados nos últimos N dias (padrão: 7) */
   diasRecentes?: number;
@@ -26,6 +28,7 @@ export interface PrecoRecente {
   preco: number;
   mercado: string;
   cnpj: string;
+  cidade: string;
   municipio?: string;
   unidade?: string;
   dataColeta: Date;
@@ -57,6 +60,7 @@ export class PrecoRepository implements IPrecoRepository {
       preco: item.preco,
       mercado: item.mercado,
       cnpj: item.cnpj,
+      cidade: normalizarCidade(item.cidade ?? item.municipio ?? 'desconhecida'),
       municipio: item.municipio,
       unidade: item.unidade,
       dataColeta: item.dataColeta ? new Date(item.dataColeta) : new Date(),
@@ -90,7 +94,8 @@ export class PrecoRepository implements IPrecoRepository {
    * Esta é a query usada pela rota de busca do usuário — lê apenas do banco.
    */
   async buscarPorTermo(termo: string, opcoes: BuscaTermoOptions = {}): Promise<PrecoRecente[]> {
-    const { municipio, diasRecentes = 7, limite = 100 } = opcoes;
+    const { cidade, municipio, diasRecentes = 7, limite = 100 } = opcoes;
+    const cidadeFiltro = cidade ?? municipio;
 
     const dataLimite = new Date();
     dataLimite.setDate(dataLimite.getDate() - diasRecentes);
@@ -100,8 +105,8 @@ export class PrecoRepository implements IPrecoRepository {
       dataColeta: { $gte: dataLimite },
     };
 
-    if (municipio) {
-      match['municipio'] = { $regex: municipio, $options: 'i' };
+    if (cidadeFiltro) {
+      match['cidade'] = normalizarCidade(cidadeFiltro);
     }
 
     try {
@@ -113,6 +118,7 @@ export class PrecoRepository implements IPrecoRepository {
           $group: {
             _id: { produto: '$produto', mercado: '$mercado', cnpj: '$cnpj' },
             preco: { $first: '$preco' },
+            cidade: { $first: '$cidade' },
             municipio: { $first: '$municipio' },
             unidade: { $first: '$unidade' },
             dataColeta: { $first: '$dataColeta' },
@@ -125,6 +131,7 @@ export class PrecoRepository implements IPrecoRepository {
             mercado: '$_id.mercado',
             cnpj: '$_id.cnpj',
             preco: 1,
+            cidade: 1,
             municipio: 1,
             unidade: 1,
             dataColeta: 1,
@@ -146,7 +153,8 @@ export class PrecoRepository implements IPrecoRepository {
    * Aplica filtros opcionais de data e município.
    */
   async buscarHistorico(produto: string, opcoes: HistoricoOptions = {}): Promise<PrecoDocument[]> {
-    const { dataInicio, dataFim, municipio, limite = 100 } = opcoes;
+    const { dataInicio, dataFim, cidade, municipio, limite = 100 } = opcoes;
+    const cidadeFiltro = cidade ?? municipio;
 
     const filtro: Record<string, unknown> = {
       produto: produto.toLowerCase().trim(),
@@ -159,8 +167,8 @@ export class PrecoRepository implements IPrecoRepository {
       };
     }
 
-    if (municipio) {
-      filtro['municipio'] = { $regex: new RegExp(municipio, 'i') };
+    if (cidadeFiltro) {
+      filtro['cidade'] = normalizarCidade(cidadeFiltro);
     }
 
     try {
@@ -184,7 +192,7 @@ export class PrecoRepository implements IPrecoRepository {
     };
 
     if (municipio) {
-      filtro['municipio'] = { $regex: new RegExp(municipio, 'i') };
+      filtro['cidade'] = normalizarCidade(municipio);
     }
 
     try {
@@ -233,4 +241,14 @@ interface BulkWriteError extends Error {
 
 function isBulkWriteError(err: unknown): err is BulkWriteError {
   return err instanceof Error && err.name === 'MongoBulkWriteError';
+}
+
+function normalizarCidade(valor: string): string {
+  return valor
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
