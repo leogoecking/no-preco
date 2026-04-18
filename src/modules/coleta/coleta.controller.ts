@@ -68,7 +68,7 @@ function coletarProdutoEspecifico(termo: string, municipio?: string): void {
         return;
       }
       const salvos = await precoRepository.salvarLote(resultado.itens, 'api');
-      log.info('Produto coletado', { termo, salvos: salvos.length });
+      log.info('Produto coletado', { termo, salvos });
     })
     .catch((err: Error) => {
       log.error('Erro ao coletar produto específico', { termo, erro: err.message });

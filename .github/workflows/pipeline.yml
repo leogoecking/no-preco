@@ -193,6 +193,18 @@ jobs:
           # Copia o build do frontend
           scp -r $SSH_OPTS frontend/dist/. "$TARGET:/opt/no-preco/frontend/dist/"
 
+          # Cria/atualiza o .env no servidor com DATABASE_URL
+          ssh $SSH_OPTS "$TARGET" "cat > /opt/no-preco/.env << 'ENVEOF'
+DATABASE_URL=${{ secrets.DATABASE_URL }}
+DIRECT_URL=${{ secrets.DIRECT_URL }}
+JWT_SECRET=${{ secrets.JWT_SECRET }}
+ADMIN_USER=${{ secrets.ADMIN_USER }}
+ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
+COLETA_MUNICIPIO=${{ vars.COLETA_MUNICIPIO || 'Teixeira de Freitas' }}
+COLETA_CRON=${{ vars.COLETA_CRON || '0 * * * *' }}
+COLETA_ATIVO=${{ vars.COLETA_ATIVO || 'true' }}
+ENVEOF"
+
           # Reinicia os serviços
           ssh $SSH_OPTS "$TARGET" \
             'set -e

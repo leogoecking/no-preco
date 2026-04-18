@@ -188,7 +188,9 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
       estrategiaUsada = 'http';
     } catch (err) {
       const status = (err as AxiosError).response?.status;
-      console.warn(`[scraper] HTTP falhou (${status ?? 'sem resposta'}) — sessão invalidada, abrindo browser...`);
+      console.warn(
+        `[scraper] HTTP falhou (${status ?? 'sem resposta'}) — sessão invalidada, abrindo browser...`,
+      );
       invalidarSessao();
     }
   }
@@ -270,18 +272,27 @@ function normalizarItem(item: unknown): ProdutoPreco {
     ).trim() || undefined;
 
   const eanRaw = String(
-    produto['gtin'] ?? produto['ean'] ?? produto['codigoBarras'] ?? raw['gtin'] ?? raw['cd_gtin'] ?? '',
+    produto['gtin'] ??
+      produto['ean'] ??
+      produto['codigoBarras'] ??
+      raw['gtin'] ??
+      raw['cd_gtin'] ??
+      '',
   ).trim();
 
   return {
     nome: String(produto['descricao'] ?? raw['nome'] ?? raw['ds_produto'] ?? '').trim(),
     preco,
-    mercado: String(estab['nomeEstabelecimento'] ?? raw['mercado'] ?? raw['nm_estabelecimento'] ?? '').trim(),
+    mercado: String(
+      estab['nomeEstabelecimento'] ?? raw['mercado'] ?? raw['nm_estabelecimento'] ?? '',
+    ).trim(),
     cnpj: formatarCnpj(String(estab['cnpj'] ?? raw['cnpj'] ?? raw['nu_cnpj'] ?? '')),
     cidade: municipioNome,
     municipio: municipioNome,
-    dataColeta: String(produto['data'] ?? raw['data'] ?? raw['dt_coleta'] ?? '').trim() || undefined,
-    unidade: String(produto['unidade'] ?? raw['unidade'] ?? raw['ds_unidade'] ?? '').trim() || undefined,
+    dataColeta:
+      String(produto['data'] ?? raw['data'] ?? raw['dt_coleta'] ?? '').trim() || undefined,
+    unidade:
+      String(produto['unidade'] ?? raw['unidade'] ?? raw['ds_unidade'] ?? '').trim() || undefined,
     ean: /^\d{8,14}$/.test(eanRaw) ? eanRaw : undefined,
   };
 }
@@ -307,8 +318,13 @@ function parseHtmlRenderizado(html: string, termoBusca: string): ProdutoPreco[] 
     try {
       const linha = $(el);
       const nome = linha.find('[data-nome], .produto-nome, td:nth-child(1)').first().text().trim();
-      const precoRaw = linha.find('[data-preco], .produto-preco, td:nth-child(2)').first().text().trim() || '0';
-      const mercado = linha.find('[data-mercado], .produto-mercado, td:nth-child(3)').first().text().trim();
+      const precoRaw =
+        linha.find('[data-preco], .produto-preco, td:nth-child(2)').first().text().trim() || '0';
+      const mercado = linha
+        .find('[data-mercado], .produto-mercado, td:nth-child(3)')
+        .first()
+        .text()
+        .trim();
       const cnpj = linha.find('[data-cnpj], td:nth-child(4)').first().text().trim();
       if (!nome && !precoRaw) return;
       itens.push({
@@ -316,7 +332,8 @@ function parseHtmlRenderizado(html: string, termoBusca: string): ProdutoPreco[] 
         preco: parsePreco(precoRaw),
         mercado,
         cnpj: formatarCnpj(cnpj),
-        municipio: linha.find('.produto-municipio, td:nth-child(5)').first().text().trim() || undefined,
+        municipio:
+          linha.find('.produto-municipio, td:nth-child(5)').first().text().trim() || undefined,
         dataColeta: linha.find('.produto-data, td:nth-child(6)').first().text().trim() || undefined,
       });
     } catch (err) {
@@ -333,7 +350,10 @@ function parseHtmlRenderizado(html: string, termoBusca: string): ProdutoPreco[] 
 
 function parsePreco(valor: unknown): number {
   if (typeof valor === 'number') return valor;
-  const str = String(valor).replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
+  const str = String(valor)
+    .replace(/[R$\s]/g, '')
+    .replace(/\./g, '')
+    .replace(',', '.');
   const n = parseFloat(str);
   return isNaN(n) ? 0 : n;
 }

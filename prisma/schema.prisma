@@ -1,0 +1,34 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Fonte {
+  api
+  html
+  browser
+}
+
+model Preco {
+  id         Int      @id @default(autoincrement())
+  produto    String
+  preco      Decimal  @db.Decimal(10, 2)
+  mercado    String
+  cnpj       String   @default("")
+  cidade     String
+  municipio  String?
+  ean        String?
+  unidade    String?
+  fonte      Fonte    @default(api)
+  dataColeta DateTime
+  criadoEm   DateTime @default(now())
+
+  @@index([produto, dataColeta(sort: Desc)])
+  @@index([cidade, produto, dataColeta(sort: Desc)])
+  @@index([ean])
+  @@map("precos")
+}

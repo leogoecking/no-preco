@@ -1,12 +1,6 @@
 import 'dotenv/config';
-import { Types } from 'mongoose';
 import { connectDatabase, disconnectDatabase } from '../shared/database/connection';
-import { PrecoModel } from '../modules/preco/preco.model';
-
-interface PrecoSemCidade {
-  _id: Types.ObjectId;
-  municipio?: string;
-}
+import { prisma } from '../shared/database/prisma';
 
 async function main(): Promise<void> {
   await connectDatabase();
@@ -14,17 +8,12 @@ async function main(): Promise<void> {
   let atualizados = 0;
   let ignorados = 0;
 
-  const cursor = PrecoModel.collection.find(
-    {
-      $or: [{ cidade: { $exists: false } }, { cidade: '' }],
-      municipio: { $exists: true, $ne: '' },
-    },
-    {
-      projection: { _id: 1, municipio: 1 },
-    },
-  ) as AsyncIterable<PrecoSemCidade>;
+  const registros = await prisma.preco.findMany({
+    where: { OR: [{ cidade: '' }, { cidade: 'desconhecida' }], municipio: { not: null } },
+    select: { id: true, municipio: true },
+  });
 
-  for await (const doc of cursor) {
+  for (const doc of registros) {
     const cidade = doc.municipio ? normalizarCidade(doc.municipio) : '';
 
     if (!cidade) {
@@ -32,7 +21,7 @@ async function main(): Promise<void> {
       continue;
     }
 
-    await PrecoModel.collection.updateOne({ _id: doc._id }, { $set: { cidade } });
+    await prisma.preco.update({ where: { id: doc.id }, data: { cidade } });
     atualizados += 1;
   }
 

@@ -192,7 +192,7 @@ export class ColetaWorker {
         produto: produto.label,
         municipio,
         encontrados: resultado.itens.length,
-        salvos: salvos.length,
+        salvos,
         duracaoMs: Date.now() - inicio,
       });
 
@@ -200,7 +200,7 @@ export class ColetaWorker {
         produto: produto.label,
         municipio,
         status: 'sucesso',
-        itensSalvos: salvos.length,
+        itensSalvos: salvos,
         duracaoMs: Date.now() - inicio,
       };
     } catch (err) {

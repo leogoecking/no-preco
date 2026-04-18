@@ -1,5 +1,5 @@
-import { PipelineStage } from 'mongoose';
-import { PrecoModel } from '../preco/preco.model';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../../shared/database/prisma';
 import {
   AlertaPreco,
   EstatisticaProduto,
@@ -14,95 +14,68 @@ import {
 // Pipeline 1 — Estatísticas da janela semanal
 // ─────────────────────────────────────────────
 
-/**
- * Agrupa os preços da janela informada e calcula, por produto:
- * min, max, média, desvio, preço mais recente e variação vs média.
- *
- * Toda a matemática roda no MongoDB — Node.js só recebe o resultado final.
- */
 export async function buscarEstatisticasSemana(
   filtro: FiltroEstatisticas,
 ): Promise<EstatisticaProduto[]> {
   const dias = filtro.dias ?? 7;
   const dataInicio = diasAtras(dias);
+  const { municipioWhere, produtosWhere } = buildWhereFragments(filtro.municipio, filtro.produtos);
 
-  const match = buildMatch(dataInicio, filtro.municipio, filtro.produtos);
+  type Row = EstatisticaProduto;
 
-  type RawEstatistica = Omit<EstatisticaProduto, 'variacaoVsMedia' | 'amplitudeAbsoluta'> & {
-    variacaoVsMedia: number;
-    amplitudeAbsoluta: number;
-  };
-
-  const pipeline: PipelineStage[] = [
-    { $match: match },
-
-    // Garante que $first capture o dado mais recente
-    { $sort: { dataColeta: -1 as const } },
-
-    {
-      $group: {
-        _id: '$produto',
-        precoAtual: { $first: '$preco' },
-        mercadoAtual: { $first: '$mercado' },
-        ultimaColeta: { $first: '$dataColeta' },
-        precoMin: { $min: '$preco' },
-        precoMax: { $max: '$preco' },
-        precoMedio: { $avg: '$preco' },
-        totalAmostras: { $sum: 1 },
-      },
-    },
-
-    {
-      $addFields: {
-        produto: '$_id',
-
-        // Amplitude absoluta: max − min
-        amplitudeAbsoluta: { $subtract: ['$precoMax', '$precoMin'] },
-
-        // Variação % do preço atual vs média (evita divisão por zero)
-        variacaoVsMedia: {
-          $cond: {
-            if: { $gt: ['$precoMedio', 0] },
-            then: {
-              $round: [
-                {
-                  $multiply: [
-                    { $divide: [{ $subtract: ['$precoAtual', '$precoMedio'] }, '$precoMedio'] },
-                    100,
-                  ],
-                },
-                2,
-              ],
-            },
-            else: 0,
-          },
-        },
-
-        precoMin: { $round: ['$precoMin', 2] },
-        precoMax: { $round: ['$precoMax', 2] },
-        precoMedio: { $round: ['$precoMedio', 2] },
-        precoAtual: { $round: ['$precoAtual', 2] },
-      },
-    },
-
-    { $project: { _id: 0 } },
-    { $sort: { produto: 1 as const } },
-  ];
-
-  return PrecoModel.aggregate<RawEstatistica>(pipeline).exec();
+  return prisma.$queryRaw<Row[]>(
+    Prisma.sql`
+      WITH janela AS (
+        SELECT produto, preco, mercado, "dataColeta"
+        FROM precos
+        WHERE "dataColeta" >= ${dataInicio}
+          AND preco > 0
+          ${municipioWhere}
+          ${produtosWhere}
+      ),
+      latest AS (
+        SELECT DISTINCT ON (produto)
+          produto,
+          preco        AS "precoAtual",
+          mercado      AS "mercadoAtual",
+          "dataColeta" AS "ultimaColeta"
+        FROM janela
+        ORDER BY produto, "dataColeta" DESC
+      ),
+      agg AS (
+        SELECT
+          produto,
+          MIN(preco)::float8  AS "precoMin",
+          MAX(preco)::float8  AS "precoMax",
+          AVG(preco)::float8  AS "precoMedio",
+          COUNT(*)::int       AS "totalAmostras"
+        FROM janela
+        GROUP BY produto
+      )
+      SELECT
+        a.produto,
+        ROUND(l."precoAtual"::numeric, 2)::float8                              AS "precoAtual",
+        l."mercadoAtual",
+        l."ultimaColeta",
+        ROUND(a."precoMin"::numeric, 2)::float8                                AS "precoMin",
+        ROUND(a."precoMax"::numeric, 2)::float8                                AS "precoMax",
+        ROUND(a."precoMedio"::numeric, 2)::float8                              AS "precoMedio",
+        a."totalAmostras",
+        ROUND((a."precoMax" - a."precoMin")::numeric, 2)::float8               AS "amplitudeAbsoluta",
+        CASE WHEN a."precoMedio" > 0 THEN
+          ROUND(((l."precoAtual" - a."precoMedio") / a."precoMedio" * 100)::numeric, 2)::float8
+        ELSE 0 END                                                             AS "variacaoVsMedia"
+      FROM agg a
+      JOIN latest l ON l.produto = a.produto
+      ORDER BY a.produto
+    `,
+  );
 }
 
 // ─────────────────────────────────────────────
 // Pipeline 2 — Ranking de volatilidade
 // ─────────────────────────────────────────────
 
-/**
- * Calcula, para cada produto, o coeficiente de variação (CV = σ/μ × 100)
- * usando $stdDevSamp do MongoDB. Ordena do mais volátil para o mais estável.
- *
- * Produtos com menos de `minimoAmostras` são excluídos — com poucas
- * observações, o CV não é estatisticamente representativo.
- */
 export async function buscarRankingVolatilidade(
   filtro: FiltroVolatilidade,
 ): Promise<ProdutoVolatilidade[]> {
@@ -110,77 +83,51 @@ export async function buscarRankingVolatilidade(
   const limite = filtro.limite ?? 20;
   const minimoAmostras = filtro.minimoAmostras ?? 5;
   const dataInicio = diasAtras(dias);
+  const { municipioWhere, produtosWhere } = buildWhereFragments(filtro.municipio, filtro.produtos);
 
-  const match = buildMatch(dataInicio, filtro.municipio, filtro.produtos);
+  type RawRow = Omit<ProdutoVolatilidade, 'posicao' | 'nivel'>;
 
-  type RawVolatilidade = Omit<ProdutoVolatilidade, 'posicao' | 'nivel'>;
+  const rows = await prisma.$queryRaw<RawRow[]>(
+    Prisma.sql`
+      WITH janela AS (
+        SELECT produto, preco
+        FROM precos
+        WHERE "dataColeta" >= ${dataInicio}
+          AND preco > 0
+          ${municipioWhere}
+          ${produtosWhere}
+      ),
+      agg AS (
+        SELECT
+          produto,
+          MIN(preco)::float8          AS "precoMin",
+          MAX(preco)::float8          AS "precoMax",
+          AVG(preco)::float8          AS "precoMedio",
+          STDDEV_SAMP(preco)::float8  AS "desvioPadrao",
+          COUNT(*)::int               AS "totalAmostras"
+        FROM janela
+        GROUP BY produto
+        HAVING COUNT(*) >= ${minimoAmostras}
+      )
+      SELECT
+        produto,
+        ROUND("precoMin"::numeric, 2)::float8     AS "precoMin",
+        ROUND("precoMax"::numeric, 2)::float8     AS "precoMax",
+        ROUND("precoMedio"::numeric, 2)::float8   AS "precoMedio",
+        ROUND("desvioPadrao"::numeric, 2)::float8 AS "desvioPadrao",
+        "totalAmostras",
+        CASE WHEN "precoMedio" > 0 THEN
+          ROUND(("desvioPadrao" / "precoMedio" * 100)::numeric, 2)::float8
+        ELSE 0 END AS "coeficienteVariacao",
+        CASE WHEN "precoMedio" > 0 THEN
+          ROUND((("precoMax" - "precoMin") / "precoMedio" * 100)::numeric, 2)::float8
+        ELSE 0 END AS "amplitudePercent"
+      FROM agg
+      ORDER BY "coeficienteVariacao" DESC
+      LIMIT ${limite}
+    `,
+  );
 
-  const pipeline: PipelineStage[] = [
-    { $match: match },
-
-    {
-      $group: {
-        _id: '$produto',
-        precoMin: { $min: '$preco' },
-        precoMax: { $max: '$preco' },
-        precoMedio: { $avg: '$preco' },
-        desvioPadrao: { $stdDevSamp: '$preco' }, // ← nativo do MongoDB
-        totalAmostras: { $sum: 1 },
-      },
-    },
-
-    // Descarta produtos com poucas amostras antes de calcular CV
-    { $match: { totalAmostras: { $gte: minimoAmostras } } },
-
-    {
-      $addFields: {
-        produto: '$_id',
-
-        // Coeficiente de variação (CV) — métrica adimensional de dispersão
-        coeficienteVariacao: {
-          $cond: {
-            if: { $gt: ['$precoMedio', 0] },
-            then: {
-              $round: [{ $multiply: [{ $divide: ['$desvioPadrao', '$precoMedio'] }, 100] }, 2],
-            },
-            else: 0,
-          },
-        },
-
-        // Amplitude %: (max − min) / média × 100
-        amplitudePercent: {
-          $cond: {
-            if: { $gt: ['$precoMedio', 0] },
-            then: {
-              $round: [
-                {
-                  $multiply: [
-                    { $divide: [{ $subtract: ['$precoMax', '$precoMin'] }, '$precoMedio'] },
-                    100,
-                  ],
-                },
-                2,
-              ],
-            },
-            else: 0,
-          },
-        },
-
-        precoMin: { $round: ['$precoMin', 2] },
-        precoMax: { $round: ['$precoMax', 2] },
-        precoMedio: { $round: ['$precoMedio', 2] },
-        desvioPadrao: { $round: ['$desvioPadrao', 2] },
-      },
-    },
-
-    { $project: { _id: 0 } },
-    { $sort: { coeficienteVariacao: -1 as const } },
-    { $limit: limite },
-  ];
-
-  const rows = await PrecoModel.aggregate<RawVolatilidade>(pipeline).exec();
-
-  // Adiciona posição e classificação de nível (lógica simples, não vale uma pipeline)
   return rows.map((r, i) => ({
     ...r,
     posicao: i + 1,
@@ -192,97 +139,63 @@ export async function buscarRankingVolatilidade(
 // Pipeline 3 — Alertas de mínimo histórico (6 meses)
 // ─────────────────────────────────────────────
 
-/**
- * Calcula, numa única passagem, a média histórica de 6 meses e compara
- * com o preço mais recente de cada produto.
- *
- * Estratégia: sort DESC por dataColeta antes do $group — assim $first
- * captura o dado mais recente, enquanto $avg, $min, $max operam sobre
- * todos os documentos da janela.
- *
- * Flag `ehMinimoHistorico`: preço atual está dentro de 5% do mínimo histórico.
- */
 export async function buscarAlertasMinHistorico(filtro: FiltroAlertas): Promise<AlertaPreco[]> {
   const variacaoLimiar = filtro.variacaoLimiar ?? -5;
-  const dataInicio = diasAtras(180); // 6 meses
+  const dataInicio = diasAtras(180);
+  const { municipioWhere, produtosWhere } = buildWhereFragments(filtro.municipio, filtro.produtos);
 
-  const match = buildMatch(dataInicio, filtro.municipio, filtro.produtos);
-
-  type RawAlerta = AlertaPreco;
-
-  const pipeline: PipelineStage[] = [
-    { $match: match },
-
-    // DESC: garante que $first captura o preço mais recente
-    { $sort: { dataColeta: -1 as const } },
-
-    {
-      $group: {
-        _id: '$produto',
-
-        // Preço e mercado da coleta mais recente
-        precoAtual: { $first: '$preco' },
-        mercadoAtual: { $first: '$mercado' },
-        dataUltimaColeta: { $first: '$dataColeta' },
-
-        // Estatísticas históricas dos 6 meses completos
-        mediaHistorica6m: { $avg: '$preco' },
-        minHistorico6m: { $min: '$preco' },
-        maxHistorico6m: { $max: '$preco' },
-        totalAmostras6m: { $sum: 1 },
-      },
-    },
-
-    {
-      $addFields: {
-        produto: '$_id',
-
-        // Variação % do preço atual vs média histórica
-        variacaoVsMedia6m: {
-          $cond: {
-            if: { $gt: ['$mediaHistorica6m', 0] },
-            then: {
-              $round: [
-                {
-                  $multiply: [
-                    {
-                      $divide: [
-                        { $subtract: ['$precoAtual', '$mediaHistorica6m'] },
-                        '$mediaHistorica6m',
-                      ],
-                    },
-                    100,
-                  ],
-                },
-                2,
-              ],
-            },
-            else: 0,
-          },
-        },
-
-        // true se preço atual ≤ mínimo histórico × 1.05 (dentro de 5% do menor preço)
-        ehMinimoHistorico: {
-          $lte: ['$precoAtual', { $multiply: ['$minHistorico6m', 1.05] }],
-        },
-
-        precoAtual: { $round: ['$precoAtual', 2] },
-        mediaHistorica6m: { $round: ['$mediaHistorica6m', 2] },
-        minHistorico6m: { $round: ['$minHistorico6m', 2] },
-        maxHistorico6m: { $round: ['$maxHistorico6m', 2] },
-      },
-    },
-
-    { $project: { _id: 0 } },
-
-    // Filtra apenas onde o preço está abaixo do limiar configurado
-    { $match: { variacaoVsMedia6m: { $lte: variacaoLimiar } } },
-
-    // Maior queda primeiro (melhor oportunidade de compra no topo)
-    { $sort: { variacaoVsMedia6m: 1 as const } },
-  ];
-
-  return PrecoModel.aggregate<RawAlerta>(pipeline).exec();
+  return prisma.$queryRaw<AlertaPreco[]>(
+    Prisma.sql`
+      WITH janela AS (
+        SELECT produto, preco, mercado, "dataColeta"
+        FROM precos
+        WHERE "dataColeta" >= ${dataInicio}
+          AND preco > 0
+          ${municipioWhere}
+          ${produtosWhere}
+      ),
+      latest AS (
+        SELECT DISTINCT ON (produto)
+          produto,
+          preco        AS "precoAtual",
+          mercado      AS "mercadoAtual",
+          "dataColeta" AS "dataUltimaColeta"
+        FROM janela
+        ORDER BY produto, "dataColeta" DESC
+      ),
+      agg AS (
+        SELECT
+          produto,
+          AVG(preco)::float8 AS "mediaHistorica6m",
+          MIN(preco)::float8 AS "minHistorico6m",
+          MAX(preco)::float8 AS "maxHistorico6m",
+          COUNT(*)::int      AS "totalAmostras6m"
+        FROM janela
+        GROUP BY produto
+      )
+      SELECT
+        a.produto,
+        ROUND(l."precoAtual"::numeric, 2)::float8         AS "precoAtual",
+        l."mercadoAtual",
+        l."dataUltimaColeta",
+        ROUND(a."mediaHistorica6m"::numeric, 2)::float8   AS "mediaHistorica6m",
+        ROUND(a."minHistorico6m"::numeric, 2)::float8     AS "minHistorico6m",
+        ROUND(a."maxHistorico6m"::numeric, 2)::float8     AS "maxHistorico6m",
+        a."totalAmostras6m",
+        CASE WHEN a."mediaHistorica6m" > 0 THEN
+          ROUND(((l."precoAtual" - a."mediaHistorica6m") / a."mediaHistorica6m" * 100)::numeric, 2)::float8
+        ELSE 0 END AS "variacaoVsMedia6m",
+        (l."precoAtual" <= a."minHistorico6m" * 1.05) AS "ehMinimoHistorico"
+      FROM agg a
+      JOIN latest l ON l.produto = a.produto
+      WHERE (
+        CASE WHEN a."mediaHistorica6m" > 0 THEN
+          ((l."precoAtual" - a."mediaHistorica6m") / a."mediaHistorica6m" * 100)
+        ELSE 0 END
+      ) <= ${variacaoLimiar}
+      ORDER BY "variacaoVsMedia6m" ASC
+    `,
+  );
 }
 
 // ─────────────────────────────────────────────
@@ -295,27 +208,22 @@ function diasAtras(n: number): Date {
   return d;
 }
 
-function buildMatch(
-  dataInicio: Date,
+function buildWhereFragments(
   municipio?: string,
   produtos?: string[],
-): Record<string, unknown> {
-  const match: Record<string, unknown> = {
-    dataColeta: { $gte: dataInicio },
-    preco: { $gt: 0 },
-  };
+): { municipioWhere: Prisma.Sql; produtosWhere: Prisma.Sql } {
+  const municipioWhere = municipio
+    ? Prisma.sql`AND municipio ILIKE ${'%' + municipio + '%'}`
+    : Prisma.empty;
 
-  if (municipio) {
-    match['municipio'] = { $regex: municipio, $options: 'i' };
-  }
+  const produtosWhere =
+    produtos && produtos.length > 0
+      ? Prisma.sql`AND produto ILIKE ANY(ARRAY[${Prisma.join(
+          produtos.map((p) => `%${p.toLowerCase().trim()}%`),
+        )}])`
+      : Prisma.empty;
 
-  if (produtos && produtos.length > 0) {
-    match['produto'] = {
-      $in: produtos.map((p) => new RegExp(p.toLowerCase().trim(), 'i')),
-    };
-  }
-
-  return match;
+  return { municipioWhere, produtosWhere };
 }
 
 function classificarNivel(cv: number): NivelVolatilidade {

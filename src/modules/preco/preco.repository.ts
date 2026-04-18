@@ -1,8 +1,10 @@
-import { PrecoDocument, PrecoModel } from './preco.model';
+import { Prisma, Fonte } from '@prisma/client';
+import { prisma } from '../../shared/database/prisma';
+import { PrecoRow } from './preco.model';
 import { ProdutoPreco } from '../scraper/scraper.types';
 
 // ─────────────────────────────────────────────
-// Interface pública do Repository
+// Interfaces públicas
 // ─────────────────────────────────────────────
 
 export interface HistoricoOptions {
@@ -10,16 +12,13 @@ export interface HistoricoOptions {
   dataFim?: Date;
   cidade?: string;
   municipio?: string;
-  /** Máximo de registros retornados (padrão: 100) */
   limite?: number;
 }
 
 export interface BuscaTermoOptions {
   cidade?: string;
   municipio?: string;
-  /** Apenas preços coletados nos últimos N dias (padrão: 7) */
   diasRecentes?: number;
-  /** Máximo de registros (padrão: 100) */
   limite?: number;
 }
 
@@ -29,253 +28,163 @@ export interface PrecoRecente {
   mercado: string;
   cnpj: string;
   cidade: string;
-  municipio?: string;
-  unidade?: string;
+  municipio?: string | null;
+  unidade?: string | null;
   dataColeta: Date;
 }
 
 export interface IPrecoRepository {
-  salvarLote(itens: ProdutoPreco[], fonte: 'api' | 'html'): Promise<PrecoDocument[]>;
+  salvarLote(itens: ProdutoPreco[], fonte: 'api' | 'html' | 'browser'): Promise<number>;
   buscarPorTermo(termo: string, opcoes?: BuscaTermoOptions): Promise<PrecoRecente[]>;
   buscarPorEan(ean: string, opcoes?: BuscaTermoOptions): Promise<PrecoRecente[]>;
-  buscarHistorico(produto: string, opcoes?: HistoricoOptions): Promise<PrecoDocument[]>;
-  buscarUltimoPreco(produto: string, municipio?: string): Promise<PrecoDocument | null>;
+  buscarHistorico(produto: string, opcoes?: HistoricoOptions): Promise<PrecoRow[]>;
+  buscarUltimoPreco(produto: string, municipio?: string): Promise<PrecoRow | null>;
   contarRegistros(produto: string): Promise<number>;
 }
 
 // ─────────────────────────────────────────────
-// Implementação com Mongoose
+// Implementação com Prisma + PostgreSQL
 // ─────────────────────────────────────────────
 
 export class PrecoRepository implements IPrecoRepository {
-  /**
-   * Persiste um lote de preços coletados.
-   * Usa insertMany com ordered:false para continuar após falhas individuais
-   * (ex: violação de índice único em um item não cancela o restante).
-   */
-  async salvarLote(itens: ProdutoPreco[], fonte: 'api' | 'html'): Promise<PrecoDocument[]> {
-    if (itens.length === 0) return [];
+  async salvarLote(itens: ProdutoPreco[], fonte: 'api' | 'html' | 'browser'): Promise<number> {
+    if (itens.length === 0) return 0;
 
-    const docs = itens.map((item) => ({
-      produto: item.nome,
-      preco: item.preco,
-      mercado: item.mercado,
-      cnpj: item.cnpj,
+    const data = itens.map((item) => ({
+      produto: item.nome.toLowerCase().trim(),
+      preco: new Prisma.Decimal(item.preco),
+      mercado: item.mercado.trim(),
+      cnpj: item.cnpj?.trim() ?? '',
       cidade: normalizarCidade(item.cidade ?? item.municipio ?? 'desconhecida'),
-      municipio: item.municipio,
-      unidade: item.unidade,
-      ean: item.ean,
+      municipio: item.municipio ?? null,
+      unidade: item.unidade ?? null,
+      ean: item.ean ?? null,
       dataColeta: item.dataColeta ? new Date(item.dataColeta) : new Date(),
-      fonte,
+      fonte: fonte as Fonte,
     }));
 
     try {
-      const resultado = await PrecoModel.insertMany(docs, {
-        ordered: false,
-        // Retorna os documentos completos com _id gerado
-        rawResult: false,
-      });
-
-      console.log(`[repository] ${resultado.length}/${itens.length} preços salvos`);
-      return resultado as unknown as PrecoDocument[];
-    } catch (err: unknown) {
-      // BulkWriteError: alguns documentos foram inseridos, outros falharam
-      // (ex: duplicate key) — loga mas não lança, pois inserções parciais são OK
-      if (isBulkWriteError(err)) {
-        const inserted = err.result?.nInserted ?? 0;
-        console.warn(
-          `[repository] Inserção parcial: ${inserted}/${itens.length} salvos (duplicatas ignoradas)`,
-        );
-        return [];
-      }
+      const result = await prisma.preco.createMany({ data, skipDuplicates: false });
+      console.log(`[repository] ${result.count}/${itens.length} preços salvos`);
+      return result.count;
+    } catch (err) {
       throw new RepositoryError('Falha ao salvar lote de preços', err);
     }
   }
 
-  /**
-   * Busca os preços mais recentes para um termo de pesquisa via agregação.
-   * Retorna o menor preço por mercado (deduplicado), ordenado do mais barato.
-   * Esta é a query usada pela rota de busca do usuário — lê apenas do banco.
-   */
   async buscarPorTermo(termo: string, opcoes: BuscaTermoOptions = {}): Promise<PrecoRecente[]> {
     const { cidade, municipio, diasRecentes = 7, limite = 100 } = opcoes;
     const cidadeFiltro = cidade ?? municipio;
+    const dataLimite = diasAtras(diasRecentes);
+    const termoLike = `%${termo.toLowerCase().trim()}%`;
 
-    const dataLimite = new Date();
-    dataLimite.setDate(dataLimite.getDate() - diasRecentes);
+    const whereExtra = cidadeFiltro
+      ? Prisma.sql`AND cidade = ${normalizarCidade(cidadeFiltro)}`
+      : Prisma.empty;
 
-    const match: Record<string, unknown> = {
-      produto: { $regex: termo.toLowerCase().trim(), $options: 'i' },
-      dataColeta: { $gte: dataLimite },
-    };
-
-    if (cidadeFiltro) {
-      match['cidade'] = normalizarCidade(cidadeFiltro);
-    }
-
-    try {
-      const resultado = await PrecoModel.aggregate<PrecoRecente>([
-        { $match: match },
-        { $sort: { dataColeta: -1 } },
-        // Preço mais recente por (produto, mercado)
-        {
-          $group: {
-            _id: { produto: '$produto', mercado: '$mercado', cnpj: '$cnpj' },
-            preco: { $first: '$preco' },
-            cidade: { $first: '$cidade' },
-            municipio: { $first: '$municipio' },
-            unidade: { $first: '$unidade' },
-            dataColeta: { $first: '$dataColeta' },
-          },
-        },
-        {
-          $project: {
-            _id: 0,
-            produto: '$_id.produto',
-            mercado: '$_id.mercado',
-            cnpj: '$_id.cnpj',
-            preco: 1,
-            cidade: 1,
-            municipio: 1,
-            unidade: 1,
-            dataColeta: 1,
-          },
-        },
-        // Mais baratos primeiro
-        { $sort: { preco: 1 } },
-        { $limit: limite },
-      ]).exec();
-
-      return resultado;
-    } catch (err) {
-      throw new RepositoryError(`Falha ao buscar preços para "${termo}"`, err);
-    }
+    return prisma.$queryRaw<PrecoRecente[]>(
+      Prisma.sql`
+        WITH ranked AS (
+          SELECT *,
+            ROW_NUMBER() OVER (PARTITION BY produto, mercado, cnpj ORDER BY "dataColeta" DESC) AS rn
+          FROM precos
+          WHERE produto ILIKE ${termoLike}
+            AND "dataColeta" >= ${dataLimite}
+            ${whereExtra}
+        )
+        SELECT
+          produto,
+          preco::float8 AS preco,
+          mercado,
+          cnpj,
+          cidade,
+          municipio,
+          unidade,
+          "dataColeta"
+        FROM ranked
+        WHERE rn = 1
+        ORDER BY preco ASC
+        LIMIT ${limite}
+      `,
+    );
   }
 
-  /**
-   * Busca preços recentes por EAN/GTIN exato.
-   * Retorna o menor preço por mercado, ordenado do mais barato.
-   */
   async buscarPorEan(ean: string, opcoes: BuscaTermoOptions = {}): Promise<PrecoRecente[]> {
     const { cidade, municipio, diasRecentes = 7, limite = 100 } = opcoes;
     const cidadeFiltro = cidade ?? municipio;
+    const dataLimite = diasAtras(diasRecentes);
 
-    const dataLimite = new Date();
-    dataLimite.setDate(dataLimite.getDate() - diasRecentes);
+    const whereExtra = cidadeFiltro
+      ? Prisma.sql`AND cidade = ${normalizarCidade(cidadeFiltro)}`
+      : Prisma.empty;
 
-    const match: Record<string, unknown> = {
-      ean: ean.trim(),
-      dataColeta: { $gte: dataLimite },
-    };
-
-    if (cidadeFiltro) {
-      match['cidade'] = normalizarCidade(cidadeFiltro);
-    }
-
-    try {
-      const resultado = await PrecoModel.aggregate<PrecoRecente>([
-        { $match: match },
-        { $sort: { dataColeta: -1 } },
-        {
-          $group: {
-            _id: { produto: '$produto', mercado: '$mercado', cnpj: '$cnpj' },
-            preco: { $first: '$preco' },
-            cidade: { $first: '$cidade' },
-            municipio: { $first: '$municipio' },
-            unidade: { $first: '$unidade' },
-            dataColeta: { $first: '$dataColeta' },
-          },
-        },
-        {
-          $project: {
-            _id: 0,
-            produto: '$_id.produto',
-            mercado: '$_id.mercado',
-            cnpj: '$_id.cnpj',
-            preco: 1,
-            cidade: 1,
-            municipio: 1,
-            unidade: 1,
-            dataColeta: 1,
-          },
-        },
-        { $sort: { preco: 1 } },
-        { $limit: limite },
-      ]).exec();
-
-      return resultado;
-    } catch (err) {
-      throw new RepositoryError(`Falha ao buscar preços para EAN "${ean}"`, err);
-    }
+    return prisma.$queryRaw<PrecoRecente[]>(
+      Prisma.sql`
+        WITH ranked AS (
+          SELECT *,
+            ROW_NUMBER() OVER (PARTITION BY produto, mercado, cnpj ORDER BY "dataColeta" DESC) AS rn
+          FROM precos
+          WHERE ean = ${ean.trim()}
+            AND "dataColeta" >= ${dataLimite}
+            ${whereExtra}
+        )
+        SELECT
+          produto,
+          preco::float8 AS preco,
+          mercado,
+          cnpj,
+          cidade,
+          municipio,
+          unidade,
+          "dataColeta"
+        FROM ranked
+        WHERE rn = 1
+        ORDER BY preco ASC
+        LIMIT ${limite}
+      `,
+    );
   }
 
-  /**
-   * Retorna o histórico de preços de um produto, do mais recente para o mais antigo.
-   * Aplica filtros opcionais de data e município.
-   */
-  async buscarHistorico(produto: string, opcoes: HistoricoOptions = {}): Promise<PrecoDocument[]> {
+  async buscarHistorico(produto: string, opcoes: HistoricoOptions = {}): Promise<PrecoRow[]> {
     const { dataInicio, dataFim, cidade, municipio, limite = 100 } = opcoes;
     const cidadeFiltro = cidade ?? municipio;
 
-    const filtro: Record<string, unknown> = {
-      produto: produto.toLowerCase().trim(),
-    };
+    const rows = await prisma.preco.findMany({
+      where: {
+        produto: produto.toLowerCase().trim(),
+        ...(dataInicio || dataFim
+          ? {
+              dataColeta: {
+                ...(dataInicio ? { gte: dataInicio } : {}),
+                ...(dataFim ? { lte: dataFim } : {}),
+              },
+            }
+          : {}),
+        ...(cidadeFiltro ? { cidade: normalizarCidade(cidadeFiltro) } : {}),
+      },
+      orderBy: { dataColeta: 'desc' },
+      take: limite,
+    });
 
-    if (dataInicio || dataFim) {
-      filtro['dataColeta'] = {
-        ...(dataInicio ? { $gte: dataInicio } : {}),
-        ...(dataFim ? { $lte: dataFim } : {}),
-      };
-    }
-
-    if (cidadeFiltro) {
-      filtro['cidade'] = normalizarCidade(cidadeFiltro);
-    }
-
-    try {
-      return await PrecoModel.find(filtro)
-        .sort({ dataColeta: -1 })
-        .limit(limite)
-        .lean<PrecoDocument[]>()
-        .exec();
-    } catch (err) {
-      throw new RepositoryError(`Falha ao buscar histórico de "${produto}"`, err);
-    }
+    return rows.map(toPrecoRow);
   }
 
-  /**
-   * Retorna o registro mais recente de um produto, opcionalmente filtrado por município.
-   * Útil para exibir "preço atual" sem carregar o histórico completo.
-   */
-  async buscarUltimoPreco(produto: string, municipio?: string): Promise<PrecoDocument | null> {
-    const filtro: Record<string, unknown> = {
-      produto: produto.toLowerCase().trim(),
-    };
+  async buscarUltimoPreco(produto: string, municipio?: string): Promise<PrecoRow | null> {
+    const row = await prisma.preco.findFirst({
+      where: {
+        produto: produto.toLowerCase().trim(),
+        ...(municipio ? { cidade: normalizarCidade(municipio) } : {}),
+      },
+      orderBy: { dataColeta: 'desc' },
+    });
 
-    if (municipio) {
-      filtro['cidade'] = normalizarCidade(municipio);
-    }
-
-    try {
-      return await PrecoModel.findOne(filtro).sort({ dataColeta: -1 }).lean<PrecoDocument>().exec();
-    } catch (err) {
-      throw new RepositoryError(`Falha ao buscar último preço de "${produto}"`, err);
-    }
+    return row ? toPrecoRow(row) : null;
   }
 
-  /** Retorna quantos registros existem para um produto — útil para paginação */
   async contarRegistros(produto: string): Promise<number> {
-    try {
-      return await PrecoModel.countDocuments({ produto: produto.toLowerCase().trim() });
-    } catch (err) {
-      throw new RepositoryError(`Falha ao contar registros de "${produto}"`, err);
-    }
+    return prisma.preco.count({ where: { produto: produto.toLowerCase().trim() } });
   }
 }
-
-// ─────────────────────────────────────────────
-// Instância singleton exportada
-// ─────────────────────────────────────────────
 
 export const precoRepository = new PrecoRepository();
 
@@ -293,14 +202,6 @@ export class RepositoryError extends Error {
   }
 }
 
-interface BulkWriteError extends Error {
-  result?: { nInserted?: number };
-}
-
-function isBulkWriteError(err: unknown): err is BulkWriteError {
-  return err instanceof Error && err.name === 'MongoBulkWriteError';
-}
-
 function normalizarCidade(valor: string): string {
   return valor
     .normalize('NFD')
@@ -309,4 +210,42 @@ function normalizarCidade(valor: string): string {
     .trim()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+function diasAtras(n: number): Date {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d;
+}
+
+type PrismaPreco = {
+  id: number;
+  produto: string;
+  preco: Prisma.Decimal;
+  mercado: string;
+  cnpj: string;
+  cidade: string;
+  municipio: string | null;
+  ean: string | null;
+  unidade: string | null;
+  fonte: Fonte;
+  dataColeta: Date;
+  criadoEm: Date;
+};
+
+function toPrecoRow(row: PrismaPreco): PrecoRow {
+  return {
+    id: row.id,
+    produto: row.produto,
+    preco: Number(row.preco),
+    mercado: row.mercado,
+    cnpj: row.cnpj,
+    cidade: row.cidade,
+    municipio: row.municipio,
+    ean: row.ean,
+    unidade: row.unidade,
+    fonte: row.fonte as 'api' | 'html' | 'browser',
+    dataColeta: row.dataColeta,
+    criadoEm: row.criadoEm,
+  };
 }
