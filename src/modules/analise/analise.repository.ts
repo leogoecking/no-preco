@@ -80,11 +80,14 @@ export async function buscarMatrizPrecos(
  */
 function montarMatriz(rows: OfertaRaw[], termos: string[]): MatrizPrecos {
   const matriz: MatrizPrecos = new Map();
+  const termosOrdenados = [...termos].sort((a, b) => b.length - a.length);
 
   for (const row of rows) {
-    // Identifica a qual termo da lista este produto pertence
+    // Identifica a qual termo da lista este produto pertence.
+    // Ordena por comprimento decrescente para que termos específicos ("arroz 5kg")
+    // tenham prioridade sobre genéricos ("arroz") no primeiro match.
     const termoAssociado =
-      termos.find((t) => row.produto.includes(t.toLowerCase().trim())) ?? row.produto;
+      termosOrdenados.find((t) => row.produto.includes(t.toLowerCase().trim())) ?? row.produto;
 
     if (!matriz.has(termoAssociado)) {
       matriz.set(termoAssociado, new Map());

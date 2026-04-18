@@ -10,6 +10,7 @@
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
     "worker": "ts-node-dev --respawn --transpile-only src/jobs/worker.scheduler.ts",
     "cron:teste": "ts-node-dev --respawn --transpile-only src/jobs/cron-teste.ts",
     "backfill:cidade": "ts-node --transpile-only src/scripts/backfill-cidade.ts"

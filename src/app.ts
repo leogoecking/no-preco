@@ -22,6 +22,7 @@ app.get('/', (_req, res) => {
       buscarProdutos: '/buscar?produto=arroz&cidade=teixeira-de-freitas',
       historicoProdutos: '/produtos/historico?termo=arroz',
       coletaStatus: '/coleta/status',
+      analiseCarrinho: 'POST /analise/carrinho',
       estatisticas: '/inteligencia/estatisticas',
       volatilidade: '/inteligencia/volatilidade',
       alertas: '/inteligencia/alertas',

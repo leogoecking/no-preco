@@ -123,9 +123,9 @@ async function obterCredenciaisBusca(): Promise<{ csrfToken: string; cookie: str
 
   const $ = cheerio.load(response.data);
   const csrfToken = $('#validate').attr('data-id');
-  const cookie = (response.headers['set-cookie'] ?? [])
-    .map((value) => value.split(';')[0])
-    .join('; ');
+  const rawCookie = response.headers['set-cookie'];
+  const cookieArray = Array.isArray(rawCookie) ? rawCookie : rawCookie ? [rawCookie] : [];
+  const cookie = cookieArray.map((value) => value.split(';')[0]).join('; ');
 
   if (!csrfToken || !cookie) {
     throw new Error('Não foi possível obter token CSRF/cookies da página de busca');

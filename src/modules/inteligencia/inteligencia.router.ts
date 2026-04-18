@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { alertas, estatisticas, volatilidade } from './inteligencia.controller';
-import { limiterAnalise } from '../../shared/middleware/rate-limiter';
 
 export const inteligenciaRouter = Router();
 
@@ -15,7 +14,7 @@ export const inteligenciaRouter = Router();
  *
  * Retorna: min, max, média, preço atual, variação % vs média.
  */
-inteligenciaRouter.get('/inteligencia/estatisticas', limiterAnalise, estatisticas);
+inteligenciaRouter.get('/inteligencia/estatisticas', estatisticas);
 
 /**
  * GET /inteligencia/volatilidade
@@ -28,7 +27,7 @@ inteligenciaRouter.get('/inteligencia/estatisticas', limiterAnalise, estatistica
  *   minimoAmostras  number 2–30     — amostras mínimas para entrar (padrão 5)
  *   produtos        csv             — restringe análise a produtos específicos
  */
-inteligenciaRouter.get('/inteligencia/volatilidade', limiterAnalise, volatilidade);
+inteligenciaRouter.get('/inteligencia/volatilidade', volatilidade);
 
 /**
  * GET /inteligencia/alertas
@@ -41,4 +40,4 @@ inteligenciaRouter.get('/inteligencia/volatilidade', limiterAnalise, volatilidad
  *
  * Retorna preço atual, média 6m, variação % e flag ehMinimoHistorico.
  */
-inteligenciaRouter.get('/inteligencia/alertas', limiterAnalise, alertas);
+inteligenciaRouter.get('/inteligencia/alertas', alertas);

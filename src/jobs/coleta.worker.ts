@@ -38,6 +38,7 @@ export interface RelatorioColeta {
 
 export interface WorkerStatus {
   emExecucao: boolean;
+  municipioPadrao: string;
   ultimoRelatorio: RelatorioColeta | null;
 }
 
@@ -62,7 +63,7 @@ export class ColetaWorker {
   private lastReport: RelatorioColeta | null = null;
   private abortController = new AbortController();
 
-  constructor(private readonly delayEntreRequisicoeMs = 5_000) {
+  constructor() {
     this.log = new Logger('ColetaWorker');
   }
 
@@ -71,6 +72,7 @@ export class ColetaWorker {
   getStatus(): WorkerStatus {
     return {
       emExecucao: this.isRunning,
+      municipioPadrao: coletaConfig.municipioPadrao,
       ultimoRelatorio: this.lastReport,
     };
   }
@@ -92,7 +94,8 @@ export class ColetaWorker {
   async execute(): Promise<RelatorioColeta> {
     if (this.isRunning) {
       this.log.warn('Ciclo já em execução — pulando disparo');
-      return this.lastReport!;
+      if (!this.lastReport) throw new Error('Worker em execução mas sem relatório anterior disponível');
+      return this.lastReport;
     }
 
     // Reseta o AbortController para este novo ciclo
@@ -109,34 +112,42 @@ export class ColetaWorker {
       municipioPadrao: coletaConfig.municipioPadrao,
     });
 
-    for (let i = 0; i < tarefas.length; i++) {
-      if (this.abortController.signal.aborted) {
-        this.log.warn('Ciclo interrompido por abort', { progresso: `${i}/${tarefas.length}` });
-        break;
-      }
+    try {
+      for (let i = 0; i < tarefas.length; i++) {
+        if (this.abortController.signal.aborted) {
+          this.log.warn('Ciclo interrompido por abort', { progresso: `${i}/${tarefas.length}` });
+          break;
+        }
 
-      const resultado = await this.processarTarefa(tarefas[i], i, tarefas.length);
-      resultados.push(resultado);
-      itensSalvos += resultado.itensSalvos ?? 0;
+        const resultado = await this.processarTarefa(tarefas[i], i, tarefas.length);
+        resultados.push(resultado);
+        itensSalvos += resultado.itensSalvos ?? 0;
 
-      // Aborta o ciclo inteiro se o site estiver bloqueando ativamente
-      if (resultado.tipoErro === 'BLOQUEIO_403') {
-        this.log.error('Bloqueio 403 detectado — abortando ciclo para proteger o IP');
-        this.abortController.abort();
-        continue;
-      }
+        // Aborta o ciclo inteiro se o site estiver bloqueando ativamente
+        if (resultado.tipoErro === 'BLOQUEIO_403') {
+          this.log.error('Bloqueio 403 detectado — abortando ciclo para proteger o IP');
+          this.abortController.abort();
+          continue;
+        }
 
-      // Delay entre tarefas (exceto após a última)
-      if (i < tarefas.length - 1 && !this.abortController.signal.aborted) {
-        await this.delay(this.delayEntreRequisicoeMs);
+        // Delay entre tarefas (exceto após a última)
+        if (i < tarefas.length - 1 && !this.abortController.signal.aborted) {
+          try {
+            await this.delay();
+          } catch (err) {
+            if ((err as DOMException).name === 'AbortError') break;
+            throw err;
+          }
+        }
       }
+    } finally {
+      this.isRunning = false;
     }
 
     const fim = new Date();
     const relatorio = this.buildRelatorio(inicio, fim, tarefas.length, resultados, itensSalvos);
 
     this.lastReport = relatorio;
-    this.isRunning = false;
 
     this.logRelatorio(relatorio);
     return relatorio;
@@ -234,7 +245,11 @@ export class ColetaWorker {
    * Se abort() for chamado durante o sleep, a Promise rejeita
    * com AbortError e o loop encerra limpo.
    */
-  private delay(ms: number): Promise<void> {
+  private delay(): Promise<void> {
+    const ms =
+      Math.floor(Math.random() * (coletaConfig.delayMaxMs - coletaConfig.delayMinMs + 1)) +
+      coletaConfig.delayMinMs;
+
     return new Promise((resolve, reject) => {
       const timer = setTimeout(resolve, ms);
 
@@ -292,4 +307,4 @@ export class ColetaWorker {
 // ─────────────────────────────────────────────
 // Singleton compartilhado entre server.ts e coleta.controller.ts
 // ─────────────────────────────────────────────
-export const coletaWorker = new ColetaWorker(5_000);
+export const coletaWorker = new ColetaWorker();

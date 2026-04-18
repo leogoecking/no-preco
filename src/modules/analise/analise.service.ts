@@ -228,7 +228,7 @@ function gerarDecisao(
   } else if (opcao2.mercadosNecessarios === 1) {
     // Combinação ótima também aponta para 1 único mercado
     recomendacao = 'MERCADO_UNICO';
-    motivo = `A combinação ótima já concentra tudo em ${opcao1.mercado}. Não há vantagem em dividir a compra.`;
+    motivo = `A combinação ótima já concentra tudo em ${opcao2.resumoPorMercado[0]?.mercado ?? opcao1.mercado}. Não há vantagem em dividir a compra.`;
   } else if (economiaPercent >= LIMIAR_ECONOMIA_PERCENT) {
     recomendacao = 'COMBINACAO';
     motivo = `Dividir a compra em ${opcao2.mercadosNecessarios} mercados gera economia de R$ ${economiaAbsoluta.toFixed(2)} (${economiaPercent.toFixed(1)}%), visitando ${mercadosExtras} mercado(s) adicional(is).`;

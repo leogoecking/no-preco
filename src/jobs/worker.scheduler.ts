@@ -74,7 +74,7 @@ export class WorkerScheduler {
    * Registra handlers de SIGTERM/SIGINT para graceful shutdown.
    * Aguarda o ciclo ativo encerrar (máx 30s) antes de sair.
    */
-  registerShutdownHandlers(): void {
+  registerShutdownHandlers(onBeforeExit?: () => Promise<void>): void {
     const shutdown = async (signal: string): Promise<void> => {
       this.log.info(`Sinal recebido — iniciando shutdown`, { signal });
       this.stop();
@@ -94,6 +94,7 @@ export class WorkerScheduler {
         this.log.info('Shutdown limpo concluído', { aguardadoMs: aguardado });
       }
 
+      await onBeforeExit?.();
       process.exit(0);
     };
 
