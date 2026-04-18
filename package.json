@@ -16,7 +16,8 @@
     "cron:teste": "ts-node-dev --respawn --transpile-only src/jobs/cron-teste.ts",
     "backfill:cidade": "ts-node --transpile-only src/scripts/backfill-cidade.ts",
     "test": "jest",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.7.0",
