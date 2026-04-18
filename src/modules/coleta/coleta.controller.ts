@@ -3,13 +3,9 @@ import { coletaWorker } from '../../jobs/coleta.worker';
 import { buscarProdutos } from '../scraper/scraper.service';
 import { precoRepository } from '../preco/preco.repository';
 import { Logger } from '../../shared/logger/logger';
+import { DispararBody } from './coleta.schemas';
 
 const log = new Logger('ColetaController');
-
-// ─────────────────────────────────────────────
-// POST /coleta/disparar
-// Inicia coleta em background — retorna 202 imediatamente.
-// ─────────────────────────────────────────────
 
 export async function disparar(req: Request, res: Response): Promise<void> {
   const { emExecucao } = coletaWorker.getStatus();
@@ -18,25 +14,21 @@ export async function disparar(req: Request, res: Response): Promise<void> {
     res.status(409).json({
       erro: 'Já existe uma coleta em andamento.',
       status: 'em_execucao',
-      consultarStatus: '/coleta/status',
+      consultarStatus: '/api/coleta/status',
     });
     return;
   }
 
-  const body = req.body as Record<string, unknown>;
-  const produto = typeof body?.['produto'] === 'string' ? body['produto'].trim() : null;
-  const municipio = typeof body?.['municipio'] === 'string' ? body['municipio'].trim() : undefined;
+  const { produto, municipio } = req.body as DispararBody;
 
-  // Responde antes de iniciar o scraping
   res.status(202).json({
     mensagem: produto
       ? `Coleta de "${produto}" iniciada em background.`
       : 'Ciclo completo iniciado em background.',
     status: 'iniciado',
-    consultarStatus: '/coleta/status',
+    consultarStatus: '/api/coleta/status',
   });
 
-  // Execução desacoplada — completamente após a resposta HTTP
   if (produto) {
     coletarProdutoEspecifico(produto, municipio);
   } else {
@@ -45,10 +37,6 @@ export async function disparar(req: Request, res: Response): Promise<void> {
     });
   }
 }
-
-// ─────────────────────────────────────────────
-// GET /coleta/status
-// ─────────────────────────────────────────────
 
 export function status(_req: Request, res: Response): void {
   const { emExecucao, municipioPadrao, ultimoRelatorio } = coletaWorker.getStatus();
@@ -71,8 +59,6 @@ export function status(_req: Request, res: Response): void {
       : null,
   });
 }
-
-// ─────────────────────────────────────────────
 
 function coletarProdutoEspecifico(termo: string, municipio?: string): void {
   buscarProdutos({ termo, municipio, pagina: 1 })

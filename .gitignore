@@ -1,5 +1,26 @@
 node_modules/
 dist/
-.env
-.env.local
 *.log
+
+# Variáveis de ambiente — todas as variantes
+.env
+.env.*
+!.env.example
+
+# Chaves privadas e certificados
+*.pem
+*.key
+*.crt
+*.cert
+*.p12
+*.pfx
+
+# Cobertura de testes
+coverage/
+
+# Contexto de sessões de IA
+.codex/
+
+# OS
+.DS_Store
+Thumbs.db

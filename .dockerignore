@@ -1,12 +1,51 @@
 node_modules
 dist
-.env
-.env.local
 *.log
+
+# Variáveis de ambiente — todas as variantes
+.env
+.env.*
+!.env.example
+
+# Chaves privadas e certificados
+*.pem
+*.key
+*.crt
+*.cert
+*.p12
+*.pfx
+
+# Git
 .git
 .gitignore
+
+# Ferramentas de desenvolvimento
 .eslintrc.json
 .prettierrc
 .prettierignore
+jest.config.*
+tsconfig.test.*
+
+# Testes e cobertura (não entram no build)
+coverage/
+src/**/*.test.ts
+src/**/*.spec.ts
+src/__tests__/
+
+# Docker e infra (não são copiados pelo Dockerfile)
+docker/
 docker-compose*.yml
+.github/
+
+# Frontend (imagem é só o backend)
+frontend/
+
+# Contexto de sessões de IA
+.codex/
+
+# Documentação
 *.md
+
+# OS
+.DS_Store
+Thumbs.db
