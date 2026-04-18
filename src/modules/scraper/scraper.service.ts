@@ -139,8 +139,7 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
     page.on('response', async (response) => {
       // Captura apenas o POST de busca — diferencia do GET da página pelo método HTTP
       const isPossBusca =
-        response.request().method() === 'POST' &&
-        response.url().includes(ENDPOINT_PESQUISA);
+        response.request().method() === 'POST' && response.url().includes(ENDPOINT_PESQUISA);
 
       if (!isPossBusca || dadosApi !== null) return;
 
