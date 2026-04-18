@@ -3,7 +3,7 @@
 # Instala APENAS dependências de produção.
 # Camada cacheada separada: só é reexecutada quando package*.json mudar.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ RUN npm ci --omit=dev
 # Stage 2 — builder
 # Instala TODAS as deps (inclui TypeScript, tipos, etc.) e compila.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -36,7 +36,7 @@ RUN npm run build
 # Imagem mínima: Alpine + Node.js + artefatos compilados.
 # Não contém TypeScript, ESLint, código-fonte, nem devDependencies.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 # Metadados da imagem
 LABEL maintainer="no-preco-api"
