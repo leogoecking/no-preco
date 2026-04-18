@@ -1,7 +1,7 @@
 import rateLimit from 'express-rate-limit';
 
 /** Resposta padrão de erro quando o limite é atingido */
-function limitMessage(acao: string) {
+function limitMessage(acao: string): { erro: string; tipo: string } {
   return {
     erro: `Muitas requisições. ${acao}`,
     tipo: 'RATE_LIMIT',

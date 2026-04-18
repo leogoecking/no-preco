@@ -94,7 +94,8 @@ export class ColetaWorker {
   async execute(): Promise<RelatorioColeta> {
     if (this.isRunning) {
       this.log.warn('Ciclo já em execução — pulando disparo');
-      if (!this.lastReport) throw new Error('Worker em execução mas sem relatório anterior disponível');
+      if (!this.lastReport)
+        throw new Error('Worker em execução mas sem relatório anterior disponível');
       return this.lastReport;
     }
 

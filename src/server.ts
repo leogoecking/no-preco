@@ -6,7 +6,7 @@ import { closeBrowser } from './shared/http/browser-client';
 import { coletaConfig } from './jobs/coleta.config';
 import { Logger } from './shared/logger/logger';
 
-const PORT         = process.env['PORT'] ?? 3000;
+const PORT = process.env['PORT'] ?? 3000;
 const COLETA_ATIVO = process.env['COLETA_ATIVO'] !== 'false';
 
 const log = new Logger('Server');

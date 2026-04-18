@@ -1,10 +1,6 @@
 import { Request, Response } from 'express';
 import { obterAlertas, obterEstatisticas, obterVolatilidade } from './inteligencia.service';
-import {
-  FiltroAlertas,
-  FiltroEstatisticas,
-  FiltroVolatilidade,
-} from './inteligencia.types';
+import { FiltroAlertas, FiltroEstatisticas, FiltroVolatilidade } from './inteligencia.types';
 
 // ─────────────────────────────────────────────
 // GET /inteligencia/estatisticas
@@ -12,8 +8,8 @@ import {
 
 export async function estatisticas(req: Request, res: Response): Promise<void> {
   const municipio = strParam(req, 'municipio');
-  const dias      = numParam(req, 'dias', 7, 1, 90);
-  const produtos  = listParam(req, 'produtos');
+  const dias = numParam(req, 'dias', 7, 1, 90);
+  const produtos = listParam(req, 'produtos');
 
   if (dias === null) {
     res.status(400).json({ erro: '"dias" deve ser um número entre 1 e 90.' });
@@ -35,11 +31,11 @@ export async function estatisticas(req: Request, res: Response): Promise<void> {
 // ─────────────────────────────────────────────
 
 export async function volatilidade(req: Request, res: Response): Promise<void> {
-  const municipio      = strParam(req, 'municipio');
-  const dias           = numParam(req, 'dias',           30, 7,  365);
-  const limite         = numParam(req, 'limite',         20, 1,   50);
-  const minimoAmostras = numParam(req, 'minimoAmostras',  5, 2,   30);
-  const produtos       = listParam(req, 'produtos');
+  const municipio = strParam(req, 'municipio');
+  const dias = numParam(req, 'dias', 30, 7, 365);
+  const limite = numParam(req, 'limite', 20, 1, 50);
+  const minimoAmostras = numParam(req, 'minimoAmostras', 5, 2, 30);
+  const produtos = listParam(req, 'produtos');
 
   if (dias === null || limite === null || minimoAmostras === null) {
     res.status(400).json({ erro: 'Parâmetros numéricos fora do intervalo permitido.' });
@@ -61,9 +57,9 @@ export async function volatilidade(req: Request, res: Response): Promise<void> {
 // ─────────────────────────────────────────────
 
 export async function alertas(req: Request, res: Response): Promise<void> {
-  const municipio      = strParam(req, 'municipio');
+  const municipio = strParam(req, 'municipio');
   const variacaoLimiar = numParam(req, 'variacaoLimiar', -5, -100, -1);
-  const produtos       = listParam(req, 'produtos');
+  const produtos = listParam(req, 'produtos');
 
   if (variacaoLimiar === null) {
     res.status(400).json({ erro: '"variacaoLimiar" deve ser um número entre -100 e -1.' });
@@ -116,7 +112,10 @@ function numParam(
 function listParam(req: Request, key: string): string[] | undefined {
   const raw = req.query[key];
   if (!raw || typeof raw !== 'string') return undefined;
-  const itens = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  const itens = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   return itens.length > 0 ? itens : undefined;
 }
 

@@ -81,7 +81,9 @@ export class PrecoRepository implements IPrecoRepository {
       // (ex: duplicate key) — loga mas não lança, pois inserções parciais são OK
       if (isBulkWriteError(err)) {
         const inserted = err.result?.nInserted ?? 0;
-        console.warn(`[repository] Inserção parcial: ${inserted}/${itens.length} salvos (duplicatas ignoradas)`);
+        console.warn(
+          `[repository] Inserção parcial: ${inserted}/${itens.length} salvos (duplicatas ignoradas)`,
+        );
         return [];
       }
       throw new RepositoryError('Falha ao salvar lote de preços', err);
@@ -196,10 +198,7 @@ export class PrecoRepository implements IPrecoRepository {
     }
 
     try {
-      return await PrecoModel.findOne(filtro)
-        .sort({ dataColeta: -1 })
-        .lean<PrecoDocument>()
-        .exec();
+      return await PrecoModel.findOne(filtro).sort({ dataColeta: -1 }).lean<PrecoDocument>().exec();
     } catch (err) {
       throw new RepositoryError(`Falha ao buscar último preço de "${produto}"`, err);
     }

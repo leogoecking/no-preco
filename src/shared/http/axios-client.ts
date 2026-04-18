@@ -29,7 +29,9 @@ export function createHttpClient(baseURL: string): AxiosInstance {
   // Interceptor de response: loga status para debugging
   client.interceptors.response.use(
     (response: AxiosResponse) => {
-      console.log(`[http] ${response.config.method?.toUpperCase()} ${response.config.url} → ${response.status}`);
+      console.log(
+        `[http] ${response.config.method?.toUpperCase()} ${response.config.url} → ${response.status}`,
+      );
       return response;
     },
     (error) => {

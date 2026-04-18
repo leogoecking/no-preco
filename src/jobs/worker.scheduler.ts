@@ -1,9 +1,9 @@
 import cron from 'node-cron';
-import { ColetaWorker, coletaWorker, RelatorioColeta } from './coleta.worker';
+import { ColetaWorker, coletaWorker, RelatorioColeta, WorkerStatus } from './coleta.worker';
 import { Logger } from '../shared/logger/logger';
 
 const CRON_PADRAO = '*/30 * * * *'; // a cada 30 minutos
-const TIMEZONE    = 'America/Bahia';
+const TIMEZONE = 'America/Bahia';
 
 /**
  * WorkerScheduler
@@ -41,16 +41,16 @@ export class WorkerScheduler {
       throw new Error(`Expressão cron inválida: "${expressao}"`);
     }
 
-    this.task = cron.schedule(
-      expressao,
-      () => this.disparar(),
-      { timezone: TIMEZONE, runOnInit: false },
-    );
+    this.task = cron.schedule(expressao, () => this.disparar(), {
+      timezone: TIMEZONE,
+      runOnInit: false,
+    });
 
     this.log.info('Scheduler iniciado', {
       cron: expressao,
       timezone: TIMEZONE,
-      produtos: this.worker.getStatus().ultimoRelatorio?.totalTarefas ?? '(pendente primeiro ciclo)',
+      produtos:
+        this.worker.getStatus().ultimoRelatorio?.totalTarefas ?? '(pendente primeiro ciclo)',
     });
   }
 
@@ -66,7 +66,7 @@ export class WorkerScheduler {
   }
 
   /** Expõe o status atual do worker para endpoints de health/status. */
-  getWorkerStatus() {
+  getWorkerStatus(): WorkerStatus {
     return this.worker.getStatus();
   }
 
@@ -80,8 +80,8 @@ export class WorkerScheduler {
       this.stop();
 
       const MAX_ESPERA_MS = 30_000;
-      const TICK_MS       = 300;
-      let aguardado       = 0;
+      const TICK_MS = 300;
+      let aguardado = 0;
 
       while (this.worker.getStatus().emExecucao && aguardado < MAX_ESPERA_MS) {
         await sleep(TICK_MS);
@@ -98,8 +98,12 @@ export class WorkerScheduler {
       process.exit(0);
     };
 
-    process.once('SIGTERM', () => { shutdown('SIGTERM').catch(console.error); });
-    process.once('SIGINT',  () => { shutdown('SIGINT').catch(console.error); });
+    process.once('SIGTERM', () => {
+      shutdown('SIGTERM').catch(console.error);
+    });
+    process.once('SIGINT', () => {
+      shutdown('SIGINT').catch(console.error);
+    });
   }
 
   // ── Privado ───────────────────────────────────
@@ -189,7 +193,7 @@ export const workerScheduler = new WorkerScheduler(coletaWorker);
 // Modo standalone: ts-node src/jobs/worker.scheduler.ts
 // ─────────────────────────────────────────────
 if (require.main === module) {
-  (async () => {
+  (async (): Promise<void> => {
     const { connectDatabase } = await import('../shared/database/connection');
     const cronExpr = process.env['COLETA_CRON'] ?? CRON_PADRAO;
 
@@ -207,7 +211,9 @@ if (require.main === module) {
       log.error('Erro na coleta inicial', { erro: err.message });
     });
   })().catch((err) => {
-    process.stderr.write(JSON.stringify({ level: 'ERROR', msg: 'Falha fatal', erro: String(err) }) + '\n');
+    process.stderr.write(
+      JSON.stringify({ level: 'ERROR', msg: 'Falha fatal', erro: String(err) }) + '\n',
+    );
     process.exit(1);
   });
 }

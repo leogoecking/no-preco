@@ -190,10 +190,7 @@ function calcularCombinacaoOtima(
 // Lógica de decisão
 // ─────────────────────────────────────────────
 
-function gerarDecisao(
-  opcao1: OpcaoMercadoUnico | null,
-  opcao2: OpcaoCombinacao,
-): Decisao {
+function gerarDecisao(opcao1: OpcaoMercadoUnico | null, opcao2: OpcaoCombinacao): Decisao {
   // Nenhum dado encontrado
   if (!opcao1 && opcao2.itens.length === 0) {
     return {

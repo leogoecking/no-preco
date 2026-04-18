@@ -24,7 +24,7 @@ export async function disparar(req: Request, res: Response): Promise<void> {
   }
 
   const body = req.body as Record<string, unknown>;
-  const produto  = typeof body?.['produto']   === 'string' ? body['produto'].trim()   : null;
+  const produto = typeof body?.['produto'] === 'string' ? body['produto'].trim() : null;
   const municipio = typeof body?.['municipio'] === 'string' ? body['municipio'].trim() : undefined;
 
   // Responde antes de iniciar o scraping
@@ -51,21 +51,22 @@ export async function disparar(req: Request, res: Response): Promise<void> {
 // ─────────────────────────────────────────────
 
 export function status(_req: Request, res: Response): void {
-  const { emExecucao, ultimoRelatorio } = coletaWorker.getStatus();
+  const { emExecucao, municipioPadrao, ultimoRelatorio } = coletaWorker.getStatus();
 
   res.status(200).json({
     emExecucao,
+    municipioPadrao,
     ultimoRelatorio: ultimoRelatorio
       ? {
-          iniciadoEm:    ultimoRelatorio.iniciadoEm,
-          finalizadoEm:  ultimoRelatorio.finalizadoEm,
-          duracaoMs:     ultimoRelatorio.duracaoMs,
-          totalTarefas:  ultimoRelatorio.totalTarefas,
-          sucessos:      ultimoRelatorio.sucessos,
+          iniciadoEm: ultimoRelatorio.iniciadoEm,
+          finalizadoEm: ultimoRelatorio.finalizadoEm,
+          duracaoMs: ultimoRelatorio.duracaoMs,
+          totalTarefas: ultimoRelatorio.totalTarefas,
+          sucessos: ultimoRelatorio.sucessos,
           semResultados: ultimoRelatorio.semResultados,
-          falhas:        ultimoRelatorio.falhas,
-          itensSalvos:   ultimoRelatorio.itensSalvos,
-          abortado:      ultimoRelatorio.abortado,
+          falhas: ultimoRelatorio.falhas,
+          itensSalvos: ultimoRelatorio.itensSalvos,
+          abortado: ultimoRelatorio.abortado,
         }
       : null,
   });

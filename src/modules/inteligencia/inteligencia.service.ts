@@ -30,9 +30,9 @@ export async function obterEstatisticas(
 export async function obterVolatilidade(
   filtro: FiltroVolatilidade,
 ): Promise<ResultadoVolatilidade> {
-  const dias           = filtro.dias           ?? 30;
+  const dias = filtro.dias ?? 30;
   const minimoAmostras = filtro.minimoAmostras ?? 5;
-  const ranking        = await buscarRankingVolatilidade(filtro);
+  const ranking = await buscarRankingVolatilidade(filtro);
 
   return {
     geradoEm: new Date().toISOString(),
@@ -46,7 +46,7 @@ export async function obterVolatilidade(
 
 export async function obterAlertas(filtro: FiltroAlertas): Promise<ResultadoAlertas> {
   const variacaoLimiar = filtro.variacaoLimiar ?? -5;
-  const alertas        = await buscarAlertasMinHistorico(filtro);
+  const alertas = await buscarAlertasMinHistorico(filtro);
 
   return {
     geradoEm: new Date().toISOString(),

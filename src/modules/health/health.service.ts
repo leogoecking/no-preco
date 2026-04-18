@@ -9,6 +9,7 @@ interface HealthStatus {
     database: 'connected' | 'disconnected';
     job: {
       emExecucao: boolean;
+      municipioPadrao: string;
       ultimaColeta: string | null;
       sucessos: number | null;
       falhas: number | null;
@@ -19,7 +20,7 @@ interface HealthStatus {
 
 export function getHealthStatus(): HealthStatus {
   const dbConnected = isDatabaseConnected();
-  const { emExecucao, ultimoRelatorio } = workerScheduler.getWorkerStatus();
+  const { emExecucao, municipioPadrao, ultimoRelatorio } = workerScheduler.getWorkerStatus();
 
   return {
     status: dbConnected ? 'ok' : 'degraded',
@@ -29,10 +30,11 @@ export function getHealthStatus(): HealthStatus {
       database: dbConnected ? 'connected' : 'disconnected',
       job: {
         emExecucao,
-        ultimaColeta:  ultimoRelatorio?.finalizadoEm.toISOString() ?? null,
-        sucessos:      ultimoRelatorio?.sucessos      ?? null,
-        falhas:        ultimoRelatorio?.falhas        ?? null,
-        itensSalvos:   ultimoRelatorio?.itensSalvos   ?? null,
+        municipioPadrao,
+        ultimaColeta: ultimoRelatorio?.finalizadoEm.toISOString() ?? null,
+        sucessos: ultimoRelatorio?.sucessos ?? null,
+        falhas: ultimoRelatorio?.falhas ?? null,
+        itensSalvos: ultimoRelatorio?.itensSalvos ?? null,
       },
     },
   };

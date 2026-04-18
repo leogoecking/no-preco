@@ -12,7 +12,6 @@
  */
 
 import cron from 'node-cron';
-import { buscarProdutos } from '../modules/scraper/scraper.service';
 
 // ─────────────────────────────────────────────
 // FASE 1: log simples — confirma que o cron dispara
@@ -25,26 +24,25 @@ function tarefaLog(): void {
 
 // ─────────────────────────────────────────────
 // FASE 2: chamada real ao ScraperService
+// Descomente o bloco abaixo e substitua "tarefaLog" por "tarefaScraper" no schedule.
 // ─────────────────────────────────────────────
 
-async function tarefaScraper(): Promise<void> {
-  const agora = new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Bahia' });
-  console.log(`[cron-teste] iniciando scraping às ${agora}...`);
-
-  try {
-    const resultado = await buscarProdutos({ termo: 'arroz', municipio: 'Salvador' });
-
-    console.log('[cron-teste] resultado:', {
-      termo: resultado.termo,
-      municipio: resultado.municipio,
-      totalItens: resultado.totalItens,
-      primeiroItem: resultado.itens[0] ?? null,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[cron-teste] erro no scraping:', msg);
-  }
-}
+// import { buscarProdutos } from '../modules/scraper/scraper.service';
+// async function tarefaScraper(): Promise<void> {
+//   const agora = new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Bahia' });
+//   console.log(`[cron-teste] iniciando scraping às ${agora}...`);
+//   try {
+//     const resultado = await buscarProdutos({ termo: 'arroz', municipio: 'Teixeira de Freitas' });
+//     console.log('[cron-teste] resultado:', {
+//       termo: resultado.termo,
+//       municipio: resultado.municipio,
+//       totalItens: resultado.totalItens,
+//       primeiroItem: resultado.itens[0] ?? null,
+//     });
+//   } catch (err) {
+//     console.error('[cron-teste] erro no scraping:', err instanceof Error ? err.message : String(err));
+//   }
+// }
 
 // ─────────────────────────────────────────────
 // Agendamento

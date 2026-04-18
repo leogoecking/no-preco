@@ -18,7 +18,7 @@ export async function getBrowser(): Promise<Browser> {
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',   // evita crash em ambientes com /dev/shm pequeno
+      '--disable-dev-shm-usage', // evita crash em ambientes com /dev/shm pequeno
       '--disable-gpu',
       '--disable-extensions',
     ],

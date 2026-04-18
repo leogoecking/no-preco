@@ -109,7 +109,9 @@ async function buscarViaApi(params: BuscaParams): Promise<ProdutoPreco[]> {
     [];
 
   if (!Array.isArray(lista)) {
-    throw new Error(`Shape inesperado — lista de resultados não é array. Keys: ${Object.keys(raw).join(', ')}`);
+    throw new Error(
+      `Shape inesperado — lista de resultados não é array. Keys: ${Object.keys(raw).join(', ')}`,
+    );
   }
 
   return lista.map(normalizarItemApi);
@@ -146,12 +148,12 @@ function normalizarItemApi(item: unknown): ProdutoPreco {
 
   const preco = parsePreco(
     produtoRaw['precoUnitario'] ??
-    produtoRaw['precoLiquido'] ??
-    produtoRaw['precoBruto'] ??
-    raw['preco'] ??
-    raw['vl_preco'] ??
-    raw['valor'] ??
-    0,
+      produtoRaw['precoLiquido'] ??
+      produtoRaw['precoBruto'] ??
+      raw['preco'] ??
+      raw['vl_preco'] ??
+      raw['valor'] ??
+      0,
   );
 
   // O nome do município pode vir sob várias chaves dependendo da versão da API.
@@ -159,11 +161,11 @@ function normalizarItemApi(item: unknown): ProdutoPreco {
   const municipioNome =
     String(
       estabelecimentoRaw['municipio'] ??
-      raw['municipio'] ??
-      raw['nm_municipio'] ??
-      raw['localidade'] ??
-      raw['cidade'] ??
-      '',
+        raw['municipio'] ??
+        raw['nm_municipio'] ??
+        raw['localidade'] ??
+        raw['cidade'] ??
+        '',
     ).trim() || undefined;
 
   return {
@@ -171,15 +173,18 @@ function normalizarItemApi(item: unknown): ProdutoPreco {
     preco,
     mercado: String(
       estabelecimentoRaw['nomeEstabelecimento'] ??
-      raw['mercado'] ??
-      raw['nm_estabelecimento'] ??
-      '',
+        raw['mercado'] ??
+        raw['nm_estabelecimento'] ??
+        '',
     ).trim(),
     cnpj: formatarCnpj(String(estabelecimentoRaw['cnpj'] ?? raw['cnpj'] ?? raw['nu_cnpj'] ?? '')),
     cidade: municipioNome,
     municipio: municipioNome,
-    dataColeta: String(produtoRaw['data'] ?? raw['data'] ?? raw['dt_coleta'] ?? '').trim() || undefined,
-    unidade: String(produtoRaw['unidade'] ?? raw['unidade'] ?? raw['ds_unidade'] ?? '').trim() || undefined,
+    dataColeta:
+      String(produtoRaw['data'] ?? raw['data'] ?? raw['dt_coleta'] ?? '').trim() || undefined,
+    unidade:
+      String(produtoRaw['unidade'] ?? raw['unidade'] ?? raw['ds_unidade'] ?? '').trim() ||
+      undefined,
   };
 }
 
@@ -227,11 +232,19 @@ function parseHtml(html: string, termoBusca: string): ProdutoPreco[] {
   if (linhas.length === 0) {
     // Verifica se há indicação de bloqueio/captcha na página
     const pageText = $('body').text().toLowerCase();
-    if (pageText.includes('captcha') || pageText.includes('acesso negado') || pageText.includes('403')) {
-      throw Object.assign(new Error('Possível bloqueio detectado no HTML'), { tipo: 'BLOQUEIO_403' });
+    if (
+      pageText.includes('captcha') ||
+      pageText.includes('acesso negado') ||
+      pageText.includes('403')
+    ) {
+      throw Object.assign(new Error('Possível bloqueio detectado no HTML'), {
+        tipo: 'BLOQUEIO_403',
+      });
     }
 
-    console.warn(`[scraper] Nenhum seletor encontrou dados para "${termoBusca}". HTML recebido: ${html.slice(0, 300)}`);
+    console.warn(
+      `[scraper] Nenhum seletor encontrou dados para "${termoBusca}". HTML recebido: ${html.slice(0, 300)}`,
+    );
     return [];
   }
 
@@ -267,7 +280,8 @@ function parseHtml(html: string, termoBusca: string): ProdutoPreco[] {
         preco: parsePreco(precoRaw),
         mercado,
         cnpj: formatarCnpj(cnpj),
-        municipio: linha.find('.produto-municipio, td:nth-child(5)').first().text().trim() || undefined,
+        municipio:
+          linha.find('.produto-municipio, td:nth-child(5)').first().text().trim() || undefined,
         dataColeta: linha.find('.produto-data, td:nth-child(6)').first().text().trim() || undefined,
       });
     } catch (err) {
@@ -360,10 +374,7 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
   let estrategiaUsada = 'api';
 
   try {
-    itens = await comRetry(
-      () => buscarViaApi(params),
-      `API "${params.termo}"`,
-    );
+    itens = await comRetry(() => buscarViaApi(params), `API "${params.termo}"`);
   } catch (apiErr) {
     const axiosErr = apiErr as AxiosError;
     const status = axiosErr.response?.status;
@@ -373,15 +384,17 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
     // 404 na rota da API é esperado se o endpoint mudou → tenta HTML
     // 403/429 → o site está bloqueando ativamente
     if (status === 403 || status === 429) {
-      throw buildScraperError('BLOQUEIO_403', `Servidor retornou ${status}`, axiosErr, ENDPOINTS.apiProdutos);
+      throw buildScraperError(
+        'BLOQUEIO_403',
+        `Servidor retornou ${status}`,
+        axiosErr,
+        ENDPOINTS.apiProdutos,
+      );
     }
 
     try {
       estrategiaUsada = 'html';
-      itens = await comRetry(
-        () => buscarViaHtml(params),
-        `HTML "${params.termo}"`,
-      );
+      itens = await comRetry(() => buscarViaHtml(params), `HTML "${params.termo}"`);
     } catch {
       // API e HTML falharam — usa browser headless como última opção
     }
@@ -404,12 +417,11 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
   // Resolve o nome do município para o retorno:
   // 1) nome que veio nos itens da API (mais confiável)
   // 2) params.municipio passado pelo chamador (fallback)
-  const municipioResolvido =
-    itens.find((i) => i.municipio)?.municipio ?? params.municipio;
+  const municipioResolvido = itens.find((i) => i.municipio)?.municipio ?? params.municipio;
 
   console.log(
     `[scraper] "${params.termo}" — ${itens.length} itens via ${estrategiaUsada}` +
-    (municipioResolvido ? ` (${municipioResolvido})` : ''),
+      (municipioResolvido ? ` (${municipioResolvido})` : ''),
   );
 
   return {

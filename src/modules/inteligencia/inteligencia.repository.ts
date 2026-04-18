@@ -42,12 +42,12 @@ export async function buscarEstatisticasSemana(
     {
       $group: {
         _id: '$produto',
-        precoAtual:    { $first: '$preco' },
-        mercadoAtual:  { $first: '$mercado' },
-        ultimaColeta:  { $first: '$dataColeta' },
-        precoMin:      { $min: '$preco' },
-        precoMax:      { $max: '$preco' },
-        precoMedio:    { $avg: '$preco' },
+        precoAtual: { $first: '$preco' },
+        mercadoAtual: { $first: '$mercado' },
+        ultimaColeta: { $first: '$dataColeta' },
+        precoMin: { $min: '$preco' },
+        precoMax: { $max: '$preco' },
+        precoMedio: { $avg: '$preco' },
         totalAmostras: { $sum: 1 },
       },
     },
@@ -78,8 +78,8 @@ export async function buscarEstatisticasSemana(
           },
         },
 
-        precoMin:   { $round: ['$precoMin',   2] },
-        precoMax:   { $round: ['$precoMax',   2] },
+        precoMin: { $round: ['$precoMin', 2] },
+        precoMax: { $round: ['$precoMax', 2] },
         precoMedio: { $round: ['$precoMedio', 2] },
         precoAtual: { $round: ['$precoAtual', 2] },
       },
@@ -106,10 +106,10 @@ export async function buscarEstatisticasSemana(
 export async function buscarRankingVolatilidade(
   filtro: FiltroVolatilidade,
 ): Promise<ProdutoVolatilidade[]> {
-  const dias            = filtro.dias            ?? 30;
-  const limite          = filtro.limite          ?? 20;
-  const minimoAmostras  = filtro.minimoAmostras  ?? 5;
-  const dataInicio      = diasAtras(dias);
+  const dias = filtro.dias ?? 30;
+  const limite = filtro.limite ?? 20;
+  const minimoAmostras = filtro.minimoAmostras ?? 5;
+  const dataInicio = diasAtras(dias);
 
   const match = buildMatch(dataInicio, filtro.municipio, filtro.produtos);
 
@@ -121,10 +121,10 @@ export async function buscarRankingVolatilidade(
     {
       $group: {
         _id: '$produto',
-        precoMin:      { $min: '$preco' },
-        precoMax:      { $max: '$preco' },
-        precoMedio:    { $avg: '$preco' },
-        desvioPadrao:  { $stdDevSamp: '$preco' },   // ← nativo do MongoDB
+        precoMin: { $min: '$preco' },
+        precoMax: { $max: '$preco' },
+        precoMedio: { $avg: '$preco' },
+        desvioPadrao: { $stdDevSamp: '$preco' }, // ← nativo do MongoDB
         totalAmostras: { $sum: 1 },
       },
     },
@@ -141,10 +141,7 @@ export async function buscarRankingVolatilidade(
           $cond: {
             if: { $gt: ['$precoMedio', 0] },
             then: {
-              $round: [
-                { $multiply: [{ $divide: ['$desvioPadrao', '$precoMedio'] }, 100] },
-                2,
-              ],
+              $round: [{ $multiply: [{ $divide: ['$desvioPadrao', '$precoMedio'] }, 100] }, 2],
             },
             else: 0,
           },
@@ -169,9 +166,9 @@ export async function buscarRankingVolatilidade(
           },
         },
 
-        precoMin:     { $round: ['$precoMin',    2] },
-        precoMax:     { $round: ['$precoMax',    2] },
-        precoMedio:   { $round: ['$precoMedio',  2] },
+        precoMin: { $round: ['$precoMin', 2] },
+        precoMax: { $round: ['$precoMax', 2] },
+        precoMedio: { $round: ['$precoMedio', 2] },
         desvioPadrao: { $round: ['$desvioPadrao', 2] },
       },
     },
@@ -187,7 +184,7 @@ export async function buscarRankingVolatilidade(
   return rows.map((r, i) => ({
     ...r,
     posicao: i + 1,
-    nivel:   classificarNivel(r.coeficienteVariacao),
+    nivel: classificarNivel(r.coeficienteVariacao),
   }));
 }
 
@@ -205,11 +202,9 @@ export async function buscarRankingVolatilidade(
  *
  * Flag `ehMinimoHistorico`: preço atual está dentro de 5% do mínimo histórico.
  */
-export async function buscarAlertasMinHistorico(
-  filtro: FiltroAlertas,
-): Promise<AlertaPreco[]> {
+export async function buscarAlertasMinHistorico(filtro: FiltroAlertas): Promise<AlertaPreco[]> {
   const variacaoLimiar = filtro.variacaoLimiar ?? -5;
-  const dataInicio     = diasAtras(180); // 6 meses
+  const dataInicio = diasAtras(180); // 6 meses
 
   const match = buildMatch(dataInicio, filtro.municipio, filtro.produtos);
 
@@ -226,15 +221,15 @@ export async function buscarAlertasMinHistorico(
         _id: '$produto',
 
         // Preço e mercado da coleta mais recente
-        precoAtual:       { $first: '$preco' },
-        mercadoAtual:     { $first: '$mercado' },
+        precoAtual: { $first: '$preco' },
+        mercadoAtual: { $first: '$mercado' },
         dataUltimaColeta: { $first: '$dataColeta' },
 
         // Estatísticas históricas dos 6 meses completos
         mediaHistorica6m: { $avg: '$preco' },
-        minHistorico6m:   { $min: '$preco' },
-        maxHistorico6m:   { $max: '$preco' },
-        totalAmostras6m:  { $sum: 1 },
+        minHistorico6m: { $min: '$preco' },
+        maxHistorico6m: { $max: '$preco' },
+        totalAmostras6m: { $sum: 1 },
       },
     },
 
@@ -271,10 +266,10 @@ export async function buscarAlertasMinHistorico(
           $lte: ['$precoAtual', { $multiply: ['$minHistorico6m', 1.05] }],
         },
 
-        precoAtual:       { $round: ['$precoAtual',       2] },
+        precoAtual: { $round: ['$precoAtual', 2] },
         mediaHistorica6m: { $round: ['$mediaHistorica6m', 2] },
-        minHistorico6m:   { $round: ['$minHistorico6m',   2] },
-        maxHistorico6m:   { $round: ['$maxHistorico6m',   2] },
+        minHistorico6m: { $round: ['$minHistorico6m', 2] },
+        maxHistorico6m: { $round: ['$maxHistorico6m', 2] },
       },
     },
 
@@ -307,7 +302,7 @@ function buildMatch(
 ): Record<string, unknown> {
   const match: Record<string, unknown> = {
     dataColeta: { $gte: dataInicio },
-    preco:      { $gt: 0 },
+    preco: { $gt: 0 },
   };
 
   if (municipio) {
@@ -324,7 +319,7 @@ function buildMatch(
 }
 
 function classificarNivel(cv: number): NivelVolatilidade {
-  if (cv < 5)  return 'ESTÁVEL';
+  if (cv < 5) return 'ESTÁVEL';
   if (cv < 15) return 'MODERADO';
   if (cv < 30) return 'VOLÁTIL';
   return 'MUITO_VOLÁTIL';

@@ -3,7 +3,7 @@ import { precoRepository } from '../preco/preco.repository';
 
 // ─────────────────────────────────────────────
 // GET /buscar?produto=arroz&cidade=teixeira-de-freitas&dias=7&limite=50
-// GET /produtos/buscar?termo=arroz&municipio=Salvador&dias=7&limite=50
+// GET /produtos/buscar?termo=arroz&municipio=Teixeira%20de%20Freitas&dias=7&limite=50
 //
 // Lê EXCLUSIVAMENTE do banco de dados.
 // O scraping acontece em background (cron job a cada hora ou POST /coleta/disparar).
@@ -58,7 +58,7 @@ export async function buscar(req: Request, res: Response): Promise<void> {
 }
 
 // ─────────────────────────────────────────────
-// GET /produtos/historico?produto=arroz&municipio=Salvador&limite=50
+// GET /produtos/historico?produto=arroz&municipio=Teixeira%20de%20Freitas&limite=50
 // Histórico completo de um produto com filtros de data.
 // ─────────────────────────────────────────────
 
@@ -66,7 +66,9 @@ export async function historico(req: Request, res: Response): Promise<void> {
   const produto = String(req.query['produto'] ?? '').trim();
   const municipio = req.query['municipio'] ? String(req.query['municipio']).trim() : undefined;
   const limite = req.query['limite'] ? Number(req.query['limite']) : 100;
-  const dataInicio = req.query['dataInicio'] ? new Date(String(req.query['dataInicio'])) : undefined;
+  const dataInicio = req.query['dataInicio']
+    ? new Date(String(req.query['dataInicio']))
+    : undefined;
   const dataFim = req.query['dataFim'] ? new Date(String(req.query['dataFim'])) : undefined;
 
   if (!produto) {

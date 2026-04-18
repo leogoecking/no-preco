@@ -30,7 +30,7 @@ const precoSchema = new Schema<IPreco>(
       required: true,
       trim: true,
       // Normaliza para minúsculo na gravação — facilita buscas case-insensitive
-      set: (v: string) => v.toLowerCase().trim(),
+      set: (v: string): string => v.toLowerCase().trim(),
     },
     preco: {
       type: Number,
@@ -64,7 +64,7 @@ const precoSchema = new Schema<IPreco>(
     dataColeta: {
       type: Date,
       required: true,
-      default: () => new Date(),
+      default: (): Date => new Date(),
     },
     fonte: {
       type: String,
