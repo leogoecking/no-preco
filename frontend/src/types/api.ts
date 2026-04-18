@@ -17,6 +17,14 @@ export interface ResultadoBusca {
   itens: ItemPreco[]
 }
 
+export interface ResultadoBuscaEan {
+  ean: string
+  cidade?: string
+  totalItens: number
+  fonte: 'banco_de_dados' | 'scrape_ao_vivo'
+  itens: ItemPreco[]
+}
+
 export interface ItemCarrinho {
   produto: string
   quantidade: number

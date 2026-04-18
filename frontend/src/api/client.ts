@@ -27,11 +27,16 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>
 }
 
-import type { ResultadoBusca, ResultadoAnalise, ItemCarrinho } from '@/types/api'
+import type { ResultadoBusca, ResultadoBuscaEan, ResultadoAnalise, ItemCarrinho } from '@/types/api'
+
+export const EAN_REGEX = /^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/
 
 export const api = {
   buscar: (produto: string) =>
     get<ResultadoBusca>('/buscar', { produto, municipio: MUNICIPIO, dias: 7, limite: 50 }),
+
+  buscarPorEan: (ean: string) =>
+    get<ResultadoBuscaEan>(`/buscar/ean/${ean}`, { municipio: MUNICIPIO }),
 
   analisarCarrinho: (itens: ItemCarrinho[]) =>
     post<ResultadoAnalise>('/analise/carrinho', { municipio: MUNICIPIO, itens }),
