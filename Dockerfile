@@ -7,7 +7,9 @@ FROM node:22-alpine AS deps
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --omit=dev
+# --ignore-scripts evita que o postinstall (prisma generate) rode aqui:
+# o schema ainda não foi copiado neste stage e o generate é feito no builder.
+RUN npm ci --omit=dev --ignore-scripts
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2 — builder
