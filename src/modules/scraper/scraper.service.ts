@@ -6,33 +6,47 @@ import { getBrowser } from '../../shared/http/browser-client';
 import { BuscaParams, ProdutoPreco, ResultadoBusca, ScraperError } from './scraper.types';
 
 const BASE_URL = 'https://precodahora.ba.gov.br';
-
-// Endpoints descobertos via DevTools — Network tab (XHR/Fetch)
-const ENDPOINTS = {
-  // API JSON interna (prioridade 1 — mais limpa e rápida)
-  apiProdutos: '/produtos/',
-  // Fallback: página HTML com tabela de resultados
-  htmlPesquisa: '/produtos/',
-} as const;
+const ENDPOINT_PESQUISA = '/produtos/pesquisa/';
+const ENDPOINT_PAGINA = '/produtos/';
 
 const client = createHttpClient(BASE_URL);
+
+// ─────────────────────────────────────────────
+// Cache de sessão Django
+//
+// O Puppeteer carrega a página uma vez, captura os cookies de sessão
+// (incluindo csrftoken) e os armazena aqui. Buscas subsequentes usam
+// Axios diretamente — sem abrir browser — até a sessão expirar.
+// ─────────────────────────────────────────────
+
+interface Sessao {
+  cookies: string;
+  csrfToken: string;
+  expiresAt: number;
+}
+
+const SESSAO_TTL_MS = 25 * 60 * 1000; // 25 minutos
+let sessaoCache: Sessao | null = null;
+
+function sessaoValida(): boolean {
+  return sessaoCache !== null && Date.now() < sessaoCache.expiresAt;
+}
+
+function invalidarSessao(): void {
+  sessaoCache = null;
+}
 
 // ─────────────────────────────────────────────
 // Retry com backoff exponencial
 // ─────────────────────────────────────────────
 
-/** Delays (ms) entre tentativas: 1ª retentar após 2s, 2ª após 4s, desiste. */
 const DELAYS_RETRY_MS = [2_000, 4_000] as const;
 
-/**
- * Erros transientes merecem retry (rede instável, timeout, 5xx).
- * Bloqueios explícitos (403/429) não devem ser retentados — ativam o circuit breaker.
- */
 function ehErroTransiente(err: unknown): boolean {
   const axiosErr = err as AxiosError;
   const status = axiosErr.response?.status;
   if (status === 403 || status === 429) return false;
-  if (!axiosErr.response) return true; // ECONNABORTED, ENETUNREACH, sem resposta
+  if (!axiosErr.response) return true;
   return status !== undefined && status >= 500;
 }
 
@@ -44,9 +58,8 @@ async function comRetry<T>(fn: () => Promise<T>, contexto: string): Promise<T> {
       return await fn();
     } catch (err) {
       ultimoErro = err;
-
-      const ehUltimaTentativa = tentativa === DELAYS_RETRY_MS.length;
-      if (!ehErroTransiente(err) || ehUltimaTentativa) throw err;
+      const ehUltima = tentativa === DELAYS_RETRY_MS.length;
+      if (!ehErroTransiente(err) || ehUltima) throw err;
 
       const espera = DELAYS_RETRY_MS[tentativa];
       console.warn(
@@ -56,21 +69,22 @@ async function comRetry<T>(fn: () => Promise<T>, contexto: string): Promise<T> {
     }
   }
 
-  // Nunca alcançado, mas satisfaz o compilador
   throw ultimoErro;
 }
 
 // ─────────────────────────────────────────────
-// Estratégia 1: API JSON oculta
+// Estratégia 1: HTTP com sessão cacheada (via rápida)
+//
+// Usa os cookies + csrftoken capturados pelo Puppeteer para
+// fazer requisições diretas sem abrir browser.
+// Falha imediatamente se a sessão estiver expirada.
 // ─────────────────────────────────────────────
 
-async function buscarViaApi(params: BuscaParams): Promise<ProdutoPreco[]> {
-  const url = ENDPOINTS.apiProdutos;
-  const { csrfToken, cookie } = await obterCredenciaisBusca();
+async function buscarViaHttp(params: BuscaParams): Promise<ProdutoPreco[]> {
+  if (!sessaoValida()) throw new Error('Sessão não disponível');
+
   const municipioId = params.municipioId ?? resolverMunicipioId(params.municipio);
 
-  // A API do site usa "codmun" (código IBGE inteiro) para filtrar por município.
-  // "municipio" (string) é usado apenas na estratégia HTML de fallback.
   const form = new URLSearchParams({
     termo: params.ean ?? params.termo,
     pagina: String(params.pagina ?? 1),
@@ -78,239 +92,27 @@ async function buscarViaApi(params: BuscaParams): Promise<ProdutoPreco[]> {
     raio: '15',
     horas: '48',
   });
+  if (municipioId != null) form.set('codmun', String(municipioId));
 
-  if (municipioId != null) {
-    form.set('codmun', String(municipioId));
-  }
-
-  const response = await client.post<unknown>(url, form, {
+  const response = await client.post<unknown>(ENDPOINT_PESQUISA, form, {
     headers: {
-      ...buildApiHeaders(BASE_URL + ENDPOINTS.htmlPesquisa),
-      Accept: 'application/json, text/javascript, */*; q=0.01',
+      ...buildApiHeaders(BASE_URL + ENDPOINT_PAGINA),
       'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
       'X-Requested-With': 'XMLHttpRequest',
-      'X-CSRFToken': csrfToken,
-      Cookie: cookie,
+      'X-CSRFToken': sessaoCache!.csrfToken,
+      Cookie: sessaoCache!.cookies,
     },
   });
 
-  const data = response.data;
-
-  // Valida shape mínima esperada: { results: [...] } ou { data: [...] }
-  if (!data || typeof data !== 'object') {
-    throw new Error('Resposta da API não é um objeto JSON válido');
-  }
-
-  const raw = data as Record<string, unknown>;
-  const lista: unknown[] =
-    (raw['resultado'] as unknown[]) ??
-    (raw['results'] as unknown[]) ??
-    (raw['data'] as unknown[]) ??
-    [];
-
-  if (!Array.isArray(lista)) {
-    throw new Error(
-      `Shape inesperado — lista de resultados não é array. Keys: ${Object.keys(raw).join(', ')}`,
-    );
-  }
-
-  return lista.map(normalizarItemApi);
-}
-
-async function obterCredenciaisBusca(): Promise<{ csrfToken: string; cookie: string }> {
-  const response = await client.get<string>(ENDPOINTS.htmlPesquisa, {
-    headers: buildApiHeaders(BASE_URL + ENDPOINTS.htmlPesquisa),
-    responseType: 'text',
-  });
-
-  const $ = cheerio.load(response.data);
-  const csrfToken = $('#validate').attr('data-id');
-  const rawCookie = response.headers['set-cookie'];
-  const cookieArray = Array.isArray(rawCookie) ? rawCookie : rawCookie ? [rawCookie] : [];
-  const cookie = cookieArray.map((value) => value.split(';')[0]).join('; ');
-
-  if (!csrfToken || !cookie) {
-    throw new Error('Não foi possível obter token CSRF/cookies da página de busca');
-  }
-
-  return { csrfToken, cookie };
-}
-
-function normalizarItemApi(item: unknown): ProdutoPreco {
-  if (!item || typeof item !== 'object') {
-    throw new Error('Item da API inválido');
-  }
-
-  const raw = item as Record<string, unknown>;
-
-  const produtoRaw = isRecord(raw['produto']) ? raw['produto'] : raw;
-  const estabelecimentoRaw = isRecord(raw['estabelecimento']) ? raw['estabelecimento'] : raw;
-
-  const preco = parsePreco(
-    produtoRaw['precoUnitario'] ??
-      produtoRaw['precoLiquido'] ??
-      produtoRaw['precoBruto'] ??
-      raw['preco'] ??
-      raw['vl_preco'] ??
-      raw['valor'] ??
-      0,
-  );
-
-  // O nome do município pode vir sob várias chaves dependendo da versão da API.
-  // "localidade" é o nome observado no endpoint /municipios/ do próprio site.
-  const municipioNome =
-    String(
-      estabelecimentoRaw['municipio'] ??
-        raw['municipio'] ??
-        raw['nm_municipio'] ??
-        raw['localidade'] ??
-        raw['cidade'] ??
-        '',
-    ).trim() || undefined;
-
-  const eanRaw = String(
-    produtoRaw['gtin'] ??
-      produtoRaw['ean'] ??
-      produtoRaw['codigoBarras'] ??
-      raw['gtin'] ??
-      raw['ean'] ??
-      raw['cd_gtin'] ??
-      raw['codigoBarras'] ??
-      '',
-  ).trim();
-
-  return {
-    nome: String(produtoRaw['descricao'] ?? raw['nome'] ?? raw['ds_produto'] ?? '').trim(),
-    preco,
-    mercado: String(
-      estabelecimentoRaw['nomeEstabelecimento'] ??
-        raw['mercado'] ??
-        raw['nm_estabelecimento'] ??
-        '',
-    ).trim(),
-    cnpj: formatarCnpj(String(estabelecimentoRaw['cnpj'] ?? raw['cnpj'] ?? raw['nu_cnpj'] ?? '')),
-    cidade: municipioNome,
-    municipio: municipioNome,
-    dataColeta:
-      String(produtoRaw['data'] ?? raw['data'] ?? raw['dt_coleta'] ?? '').trim() || undefined,
-    unidade:
-      String(produtoRaw['unidade'] ?? raw['unidade'] ?? raw['ds_unidade'] ?? '').trim() ||
-      undefined,
-    ean: /^\d{8,14}$/.test(eanRaw) ? eanRaw : undefined,
-  };
+  return extrairItens(response.data);
 }
 
 // ─────────────────────────────────────────────
-// Estratégia 2: parse HTML com Cheerio (fallback)
-// ─────────────────────────────────────────────
-
-async function buscarViaHtml(params: BuscaParams): Promise<ProdutoPreco[]> {
-  const url = ENDPOINTS.htmlPesquisa;
-
-  // O HTML aceita o nome do município como string. Se só temos o ID, não há como
-  // resolver o nome sem uma chamada extra ao /municipios/ — nesse caso, omitimos
-  // o filtro e aceitamos resultados sem recorte geográfico preciso.
-  const queryParams: Record<string, unknown> = {
-    q: params.termo,
-    page: params.pagina ?? 1,
-  };
-
-  if (params.municipio) {
-    queryParams['municipio'] = params.municipio;
-  }
-
-  const response = await client.get<string>(url, {
-    params: queryParams,
-    responseType: 'text',
-  });
-
-  const html = response.data;
-
-  if (typeof html !== 'string' || html.trim().length === 0) {
-    throw new Error('Resposta HTML vazia');
-  }
-
-  return parseHtml(html, params.termo);
-}
-
-function parseHtml(html: string, termoBusca: string): ProdutoPreco[] {
-  const $ = cheerio.load(html);
-  const itens: ProdutoPreco[] = [];
-
-  // Seletor baseado na estrutura comum do Preço da Hora BA.
-  // AJUSTE estes seletores após inspecionar o HTML real no DevTools.
-  const linhas = $('table.tabela-produtos tbody tr, .card-produto, [data-produto]');
-
-  if (linhas.length === 0) {
-    // Verifica se há indicação de bloqueio/captcha na página
-    const pageText = $('body').text().toLowerCase();
-    if (
-      pageText.includes('captcha') ||
-      pageText.includes('acesso negado') ||
-      pageText.includes('403')
-    ) {
-      throw Object.assign(new Error('Possível bloqueio detectado no HTML'), {
-        tipo: 'BLOQUEIO_403',
-      });
-    }
-
-    console.warn(
-      `[scraper] Nenhum seletor encontrou dados para "${termoBusca}". HTML recebido: ${html.slice(0, 300)}`,
-    );
-    return [];
-  }
-
-  linhas.each((_i, el) => {
-    try {
-      const linha = $(el);
-
-      // Tentativas de seletor para cada campo — adaptar ao HTML real
-      const nome =
-        linha.find('[data-nome], .produto-nome, td:nth-child(1)').first().text().trim() ||
-        linha.attr('data-nome') ||
-        '';
-
-      const precoRaw =
-        linha.find('[data-preco], .produto-preco, td:nth-child(2)').first().text().trim() ||
-        linha.attr('data-preco') ||
-        '0';
-
-      const mercado =
-        linha.find('[data-mercado], .produto-mercado, td:nth-child(3)').first().text().trim() ||
-        linha.attr('data-mercado') ||
-        '';
-
-      const cnpj =
-        linha.find('[data-cnpj], .produto-cnpj, td:nth-child(4)').first().text().trim() ||
-        linha.attr('data-cnpj') ||
-        '';
-
-      if (!nome && !precoRaw) return; // linha vazia — pula
-
-      itens.push({
-        nome,
-        preco: parsePreco(precoRaw),
-        mercado,
-        cnpj: formatarCnpj(cnpj),
-        municipio:
-          linha.find('.produto-municipio, td:nth-child(5)').first().text().trim() || undefined,
-        dataColeta: linha.find('.produto-data, td:nth-child(6)').first().text().trim() || undefined,
-      });
-    } catch (err) {
-      console.warn('[scraper] Falha ao parsear linha individual:', err);
-    }
-  });
-
-  return itens;
-}
-
-// ─────────────────────────────────────────────
-// Estratégia 3: Browser headless (Puppeteer)
+// Estratégia 2: Browser headless (Puppeteer)
 //
-// Resolve o challenge JS do site automaticamente:
-// 1. Abre uma Page no Chromium compartilhado
-// 2. Intercepta a resposta XHR de /produtos/pesquisa/ (JSON real)
-// 3. Se não capturar JSON, faz parse do HTML já renderizado pelo browser
+// Abre uma Page no Chromium, executa o JS do site e intercepta
+// a resposta XHR de /produtos/pesquisa/.
+// Ao terminar, salva os cookies de sessão para reutilização via HTTP.
 // ─────────────────────────────────────────────
 
 async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
@@ -318,7 +120,6 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
   const page = await browser.newPage();
 
   try {
-    // Bloqueia recursos desnecessários para acelerar o carregamento
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       const tipo = req.resourceType();
@@ -329,106 +130,84 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
       }
     });
 
-    // Captura a resposta do endpoint JSON interno quando o browser a receber
     let dadosApi: unknown = null;
     page.on('response', async (response) => {
-      if (response.url().includes('/produtos/pesquisa/') && dadosApi === null) {
+      if (response.url().includes(ENDPOINT_PESQUISA) && dadosApi === null) {
         try {
           const contentType = response.headers()['content-type'] ?? '';
           if (contentType.includes('json')) {
             dadosApi = await response.json();
           }
         } catch {
-          // Resposta não era JSON — ignora
+          // Resposta não era JSON
         }
       }
     });
 
-    // Monta URL da busca com os parâmetros disponíveis
-    const url = new URL(`${BASE_URL}${ENDPOINTS.htmlPesquisa}`);
-    url.searchParams.set('q', params.termo);
+    const url = new URL(BASE_URL + ENDPOINT_PAGINA);
+    url.searchParams.set('q', params.ean ?? params.termo);
     if (params.municipio) url.searchParams.set('municipio', params.municipio);
 
-    // Navega até a página — o browser executa o challenge JS e dispara o XHR
-    await page.goto(url.toString(), {
-      waitUntil: 'networkidle2',
-      timeout: 45_000,
-    });
+    await page.goto(url.toString(), { waitUntil: 'networkidle2', timeout: 45_000 });
 
-    // Se o XHR foi capturado, normaliza com a mesma função da estratégia API
-    if (dadosApi !== null) {
-      const raw = dadosApi as Record<string, unknown>;
-      const lista: unknown[] =
-        (raw['resultado'] as unknown[]) ??
-        (raw['results'] as unknown[]) ??
-        (raw['data'] as unknown[]) ??
-        [];
-      if (Array.isArray(lista) && lista.length > 0) {
-        return lista.map(normalizarItemApi);
-      }
+    // Captura cookies de sessão para reutilização futura via HTTP
+    const cookies = await page.cookies();
+    const csrfToken = cookies.find((c) => c.name === 'csrftoken')?.value ?? '';
+    if (csrfToken) {
+      const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+      sessaoCache = { cookies: cookieStr, csrfToken, expiresAt: Date.now() + SESSAO_TTL_MS };
+      console.log('[scraper] Sessão capturada via Puppeteer — válida por 25 min');
     }
 
-    // Fallback: parse do HTML já renderizado pelo Chromium
-    const htmlRenderizado = await page.content();
-    return parseHtml(htmlRenderizado, params.termo);
+    if (dadosApi !== null) {
+      const itens = extrairItens(dadosApi);
+      if (itens.length > 0) return itens;
+    }
+
+    // Fallback: parse do HTML já renderizado pelo browser
+    const html = await page.content();
+    return parseHtmlRenderizado(html, params.termo);
   } finally {
     await page.close();
   }
 }
 
 // ─────────────────────────────────────────────
-// Orquestrador: API JSON → fallback HTML → browser
+// Orquestrador: HTTP (sessão cacheada) → Puppeteer
 // ─────────────────────────────────────────────
 
 export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusca> {
   const pagina = params.pagina ?? 1;
   let itens: ProdutoPreco[] = [];
-  let estrategiaUsada = 'api';
+  let estrategiaUsada = 'browser';
 
-  try {
-    itens = await comRetry(() => buscarViaApi(params), `API "${params.termo}"`);
-  } catch (apiErr) {
-    const axiosErr = apiErr as AxiosError;
-    const status = axiosErr.response?.status;
-
-    console.warn(`[scraper] API falhou (status ${status ?? 'sem resposta'}), tentando HTML...`);
-
-    // 404 na rota da API é esperado se o endpoint mudou → tenta HTML
-    // 403/429 → o site está bloqueando ativamente
-    if (status === 403 || status === 429) {
-      throw buildScraperError(
-        'BLOQUEIO_403',
-        `Servidor retornou ${status}`,
-        axiosErr,
-        ENDPOINTS.apiProdutos,
-      );
-    }
-
+  // Via rápida: HTTP com sessão cacheada
+  if (sessaoValida()) {
     try {
-      estrategiaUsada = 'html';
-      itens = await comRetry(() => buscarViaHtml(params), `HTML "${params.termo}"`);
-    } catch {
-      // API e HTML falharam — usa browser headless como última opção
-    }
-
-    if (itens.length === 0) {
-      try {
-        estrategiaUsada = 'browser';
-        itens = await buscarViaBrowser(params);
-      } catch (browserErr) {
-        throw buildScraperError(
-          classificarErro(browserErr),
-          'Todas as estratégias falharam (axios API, axios HTML, browser)',
-          browserErr,
-          ENDPOINTS.htmlPesquisa,
-        );
-      }
+      itens = await comRetry(() => buscarViaHttp(params), `HTTP "${params.termo}"`);
+      estrategiaUsada = 'http';
+    } catch (err) {
+      const status = (err as AxiosError).response?.status;
+      console.warn(`[scraper] HTTP falhou (${status ?? 'sem resposta'}) — sessão invalidada, abrindo browser...`);
+      invalidarSessao();
     }
   }
 
-  // Resolve o nome do município para o retorno:
-  // 1) nome que veio nos itens da API (mais confiável)
-  // 2) params.municipio passado pelo chamador (fallback)
+  // Puppeteer: primeira vez ou após sessão expirar
+  if (itens.length === 0) {
+    try {
+      itens = await buscarViaBrowser(params);
+      estrategiaUsada = 'browser';
+    } catch (browserErr) {
+      throw buildScraperError(
+        classificarErro(browserErr),
+        'Todas as estratégias falharam (http + browser)',
+        browserErr,
+        BASE_URL + ENDPOINT_PESQUISA,
+      );
+    }
+  }
+
   const municipioResolvido = itens.find((i) => i.municipio)?.municipio ?? params.municipio;
 
   console.log(
@@ -447,15 +226,114 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
 }
 
 // ─────────────────────────────────────────────
+// Normalização de resposta
+// ─────────────────────────────────────────────
+
+function extrairItens(data: unknown): ProdutoPreco[] {
+  if (!data || typeof data !== 'object') {
+    throw new Error('Resposta não é um objeto JSON válido');
+  }
+
+  const raw = data as Record<string, unknown>;
+  const lista: unknown[] =
+    (raw['resultado'] as unknown[]) ??
+    (raw['results'] as unknown[]) ??
+    (raw['data'] as unknown[]) ??
+    [];
+
+  if (!Array.isArray(lista)) {
+    throw new Error(`Shape inesperado. Keys: ${Object.keys(raw).join(', ')}`);
+  }
+
+  return lista.map(normalizarItem);
+}
+
+function normalizarItem(item: unknown): ProdutoPreco {
+  if (!item || typeof item !== 'object') throw new Error('Item inválido');
+
+  const raw = item as Record<string, unknown>;
+  const produto = isRecord(raw['produto']) ? raw['produto'] : raw;
+  const estab = isRecord(raw['estabelecimento']) ? raw['estabelecimento'] : raw;
+
+  const preco = parsePreco(
+    produto['precoUnitario'] ??
+      produto['precoLiquido'] ??
+      produto['precoBruto'] ??
+      raw['preco'] ??
+      raw['vl_preco'] ??
+      0,
+  );
+
+  const municipioNome =
+    String(
+      estab['municipio'] ?? raw['municipio'] ?? raw['nm_municipio'] ?? raw['localidade'] ?? '',
+    ).trim() || undefined;
+
+  const eanRaw = String(
+    produto['gtin'] ?? produto['ean'] ?? produto['codigoBarras'] ?? raw['gtin'] ?? raw['cd_gtin'] ?? '',
+  ).trim();
+
+  return {
+    nome: String(produto['descricao'] ?? raw['nome'] ?? raw['ds_produto'] ?? '').trim(),
+    preco,
+    mercado: String(estab['nomeEstabelecimento'] ?? raw['mercado'] ?? raw['nm_estabelecimento'] ?? '').trim(),
+    cnpj: formatarCnpj(String(estab['cnpj'] ?? raw['cnpj'] ?? raw['nu_cnpj'] ?? '')),
+    cidade: municipioNome,
+    municipio: municipioNome,
+    dataColeta: String(produto['data'] ?? raw['data'] ?? raw['dt_coleta'] ?? '').trim() || undefined,
+    unidade: String(produto['unidade'] ?? raw['unidade'] ?? raw['ds_unidade'] ?? '').trim() || undefined,
+    ean: /^\d{8,14}$/.test(eanRaw) ? eanRaw : undefined,
+  };
+}
+
+function parseHtmlRenderizado(html: string, termoBusca: string): ProdutoPreco[] {
+  const $ = cheerio.load(html);
+  const itens: ProdutoPreco[] = [];
+
+  const linhas = $('table.tabela-produtos tbody tr, .card-produto, [data-produto]');
+
+  if (linhas.length === 0) {
+    const pageText = $('body').text().toLowerCase();
+    if (pageText.includes('captcha') || pageText.includes('acesso negado')) {
+      throw Object.assign(new Error('Bloqueio detectado no HTML renderizado'), {
+        tipo: 'BLOQUEIO_403',
+      });
+    }
+    console.warn(`[scraper] HTML renderizado sem dados para "${termoBusca}"`);
+    return [];
+  }
+
+  linhas.each((_i, el) => {
+    try {
+      const linha = $(el);
+      const nome = linha.find('[data-nome], .produto-nome, td:nth-child(1)').first().text().trim();
+      const precoRaw = linha.find('[data-preco], .produto-preco, td:nth-child(2)').first().text().trim() || '0';
+      const mercado = linha.find('[data-mercado], .produto-mercado, td:nth-child(3)').first().text().trim();
+      const cnpj = linha.find('[data-cnpj], td:nth-child(4)').first().text().trim();
+      if (!nome && !precoRaw) return;
+      itens.push({
+        nome,
+        preco: parsePreco(precoRaw),
+        mercado,
+        cnpj: formatarCnpj(cnpj),
+        municipio: linha.find('.produto-municipio, td:nth-child(5)').first().text().trim() || undefined,
+        dataColeta: linha.find('.produto-data, td:nth-child(6)').first().text().trim() || undefined,
+      });
+    } catch (err) {
+      console.warn('[scraper] Falha ao parsear linha HTML:', err);
+    }
+  });
+
+  return itens;
+}
+
+// ─────────────────────────────────────────────
 // Utilitários
 // ─────────────────────────────────────────────
 
 function parsePreco(valor: unknown): number {
   if (typeof valor === 'number') return valor;
-  const str = String(valor)
-    .replace(/[R$\s]/g, '')
-    .replace(/\./g, '')
-    .replace(',', '.');
+  const str = String(valor).replace(/[R$\s]/g, '').replace(/\./g, '').replace(',', '.');
   const n = parseFloat(str);
   return isNaN(n) ? 0 : n;
 }
@@ -468,12 +346,10 @@ function formatarCnpj(cnpj: string): string {
 
 function resolverMunicipioId(municipio?: string): number | undefined {
   if (!municipio) return undefined;
-
   const municipios: Record<string, number> = {
     salvador: 2927408,
     'teixeira-de-freitas': 2931350,
   };
-
   return municipios[normalizarSlug(municipio)];
 }
 
@@ -505,6 +381,5 @@ function buildScraperError(
   err: unknown,
   urlTentada?: string,
 ): ScraperError {
-  const detalhes = err instanceof Error ? err.message : String(err);
-  return { tipo, mensagem, detalhes, urlTentada };
+  return { tipo, mensagem, detalhes: err instanceof Error ? err.message : String(err), urlTentada };
 }
