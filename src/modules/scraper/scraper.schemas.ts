@@ -1,16 +1,18 @@
 import { z } from 'zod';
 
-export const BuscarQuerySchema = z.object({
-  produto: z.string().trim().min(1).max(100).optional(),
-  termo: z.string().trim().min(1).max(100).optional(),
-  cidade: z.string().trim().max(100).optional(),
-  municipio: z.string().trim().max(100).optional(),
-  dias: z.coerce.number().int().min(1).max(90).default(7),
-  limite: z.coerce.number().int().min(1).max(200).default(100),
-}).refine((d) => d.produto || d.termo, {
-  message: 'Parâmetro "produto" é obrigatório.',
-  path: ['produto'],
-});
+export const BuscarQuerySchema = z
+  .object({
+    produto: z.string().trim().min(1).max(100).optional(),
+    termo: z.string().trim().min(1).max(100).optional(),
+    cidade: z.string().trim().max(100).optional(),
+    municipio: z.string().trim().max(100).optional(),
+    dias: z.coerce.number().int().min(1).max(90).default(7),
+    limite: z.coerce.number().int().min(1).max(200).default(100),
+  })
+  .refine((d) => d.produto || d.termo, {
+    message: 'Parâmetro "produto" é obrigatório.',
+    path: ['produto'],
+  });
 
 export type BuscarQuery = z.infer<typeof BuscarQuerySchema>;
 
@@ -38,10 +40,7 @@ export const HistoricoQuerySchema = z.object({
     .string()
     .datetime({ message: 'Parâmetro "dataInicio" é uma data inválida.' })
     .optional(),
-  dataFim: z
-    .string()
-    .datetime({ message: 'Parâmetro "dataFim" é uma data inválida.' })
-    .optional(),
+  dataFim: z.string().datetime({ message: 'Parâmetro "dataFim" é uma data inválida.' }).optional(),
 });
 
 export type HistoricoQuery = z.infer<typeof HistoricoQuerySchema>;

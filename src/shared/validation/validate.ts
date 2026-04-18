@@ -34,7 +34,9 @@ export function validateParams(schema: ZodTypeAny) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const result = schema.safeParse(req.params);
     if (!result.success) {
-      res.status(400).json({ erro: 'Parâmetros de rota inválidos', detalhes: formatErrors(result.error) });
+      res
+        .status(400)
+        .json({ erro: 'Parâmetros de rota inválidos', detalhes: formatErrors(result.error) });
       return;
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

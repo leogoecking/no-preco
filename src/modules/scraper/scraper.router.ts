@@ -20,4 +20,9 @@ scraperRouter.get(
   validateQuery(BuscarEanQuerySchema),
   buscarPorEan,
 );
-scraperRouter.get('/produtos/historico', limiterLeitura, validateQuery(HistoricoQuerySchema), historico);
+scraperRouter.get(
+  '/produtos/historico',
+  limiterLeitura,
+  validateQuery(HistoricoQuerySchema),
+  historico,
+);

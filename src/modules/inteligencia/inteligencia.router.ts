@@ -9,6 +9,14 @@ import {
 
 export const inteligenciaRouter = Router();
 
-inteligenciaRouter.get('/inteligencia/estatisticas', validateQuery(EstatisticasQuerySchema), estatisticas);
-inteligenciaRouter.get('/inteligencia/volatilidade', validateQuery(VolatilidadeQuerySchema), volatilidade);
+inteligenciaRouter.get(
+  '/inteligencia/estatisticas',
+  validateQuery(EstatisticasQuerySchema),
+  estatisticas,
+);
+inteligenciaRouter.get(
+  '/inteligencia/volatilidade',
+  validateQuery(VolatilidadeQuerySchema),
+  volatilidade,
+);
 inteligenciaRouter.get('/inteligencia/alertas', validateQuery(AlertasQuerySchema), alertas);
