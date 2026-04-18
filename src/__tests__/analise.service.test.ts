@@ -3,7 +3,12 @@ import {
   calcularMercadoUnico,
   gerarDecisao,
 } from '../modules/analise/analise.service';
-import { MatrizPrecos, Oferta, OpcaoCombinacao, OpcaoMercadoUnico } from '../modules/analise/analise.types';
+import {
+  MatrizPrecos,
+  Oferta,
+  OpcaoCombinacao,
+  OpcaoMercadoUnico,
+} from '../modules/analise/analise.types';
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -72,10 +77,7 @@ describe('calcularMercadoUnico', () => {
 
   it('respeita quantidade na soma do total', () => {
     const matriz = buildMatriz({ arroz: { Mercado_A: 10 } });
-    const resultado = calcularMercadoUnico(
-      [{ produto: 'arroz', quantidade: 3 }],
-      matriz,
-    );
+    const resultado = calcularMercadoUnico([{ produto: 'arroz', quantidade: 3 }], matriz);
     expect(resultado!.totalCarrinho).toBe(30);
   });
 });
@@ -114,10 +116,7 @@ describe('calcularCombinacaoOtima', () => {
 
   it('respeita quantidade no subtotal', () => {
     const matriz = buildMatriz({ arroz: { Mercado_A: 5 } });
-    const resultado = calcularCombinacaoOtima(
-      [{ produto: 'arroz', quantidade: 4 }],
-      matriz,
-    );
+    const resultado = calcularCombinacaoOtima([{ produto: 'arroz', quantidade: 4 }], matriz);
     expect(resultado.totalCarrinho).toBe(20);
     expect(resultado.itens[0]!.subtotal).toBe(20);
   });
@@ -155,12 +154,22 @@ function opcao2(overrides: Partial<OpcaoCombinacao> = {}): OpcaoCombinacao {
 
 describe('gerarDecisao', () => {
   it('retorna SEM_DADOS quando não há opcao1 e opcao2 sem itens', () => {
-    const resultado = gerarDecisao(null, opcao2({ itens: [], totalCarrinho: 0, mercadosNecessarios: 0, resumoPorMercado: [] }));
+    const resultado = gerarDecisao(
+      null,
+      opcao2({ itens: [], totalCarrinho: 0, mercadosNecessarios: 0, resumoPorMercado: [] }),
+    );
     expect(resultado.recomendacao).toBe('SEM_DADOS');
   });
 
   it('retorna COMBINACAO quando opcao1 é null mas há itens', () => {
-    const resultado = gerarDecisao(null, opcao2({ itens: [{ produto: 'x', quantidade: 1, precoUnitario: 1, subtotal: 1, mercado: 'M', cnpj: '0' }] }));
+    const resultado = gerarDecisao(
+      null,
+      opcao2({
+        itens: [
+          { produto: 'x', quantidade: 1, precoUnitario: 1, subtotal: 1, mercado: 'M', cnpj: '0' },
+        ],
+      }),
+    );
     expect(resultado.recomendacao).toBe('COMBINACAO');
   });
 
@@ -183,7 +192,10 @@ describe('gerarDecisao', () => {
   });
 
   it('retorna COMBINACAO quando economia supera o limiar de 5%', () => {
-    const resultado = gerarDecisao(opcao1({ totalCarrinho: 100 }), opcao2({ totalCarrinho: 80, mercadosNecessarios: 2 }));
+    const resultado = gerarDecisao(
+      opcao1({ totalCarrinho: 100 }),
+      opcao2({ totalCarrinho: 80, mercadosNecessarios: 2 }),
+    );
     expect(resultado.recomendacao).toBe('COMBINACAO');
     expect(resultado.economiaAbsoluta).toBe(20);
     expect(resultado.economiaPercent).toBe(20);
