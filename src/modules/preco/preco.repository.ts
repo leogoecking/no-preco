@@ -37,6 +37,7 @@ export interface PrecoRecente {
 export interface IPrecoRepository {
   salvarLote(itens: ProdutoPreco[], fonte: 'api' | 'html'): Promise<PrecoDocument[]>;
   buscarPorTermo(termo: string, opcoes?: BuscaTermoOptions): Promise<PrecoRecente[]>;
+  buscarPorEan(ean: string, opcoes?: BuscaTermoOptions): Promise<PrecoRecente[]>;
   buscarHistorico(produto: string, opcoes?: HistoricoOptions): Promise<PrecoDocument[]>;
   buscarUltimoPreco(produto: string, municipio?: string): Promise<PrecoDocument | null>;
   contarRegistros(produto: string): Promise<number>;
@@ -63,6 +64,7 @@ export class PrecoRepository implements IPrecoRepository {
       cidade: normalizarCidade(item.cidade ?? item.municipio ?? 'desconhecida'),
       municipio: item.municipio,
       unidade: item.unidade,
+      ean: item.ean,
       dataColeta: item.dataColeta ? new Date(item.dataColeta) : new Date(),
       fonte,
     }));
@@ -147,6 +149,63 @@ export class PrecoRepository implements IPrecoRepository {
       return resultado;
     } catch (err) {
       throw new RepositoryError(`Falha ao buscar preços para "${termo}"`, err);
+    }
+  }
+
+  /**
+   * Busca preços recentes por EAN/GTIN exato.
+   * Retorna o menor preço por mercado, ordenado do mais barato.
+   */
+  async buscarPorEan(ean: string, opcoes: BuscaTermoOptions = {}): Promise<PrecoRecente[]> {
+    const { cidade, municipio, diasRecentes = 7, limite = 100 } = opcoes;
+    const cidadeFiltro = cidade ?? municipio;
+
+    const dataLimite = new Date();
+    dataLimite.setDate(dataLimite.getDate() - diasRecentes);
+
+    const match: Record<string, unknown> = {
+      ean: ean.trim(),
+      dataColeta: { $gte: dataLimite },
+    };
+
+    if (cidadeFiltro) {
+      match['cidade'] = normalizarCidade(cidadeFiltro);
+    }
+
+    try {
+      const resultado = await PrecoModel.aggregate<PrecoRecente>([
+        { $match: match },
+        { $sort: { dataColeta: -1 } },
+        {
+          $group: {
+            _id: { produto: '$produto', mercado: '$mercado', cnpj: '$cnpj' },
+            preco: { $first: '$preco' },
+            cidade: { $first: '$cidade' },
+            municipio: { $first: '$municipio' },
+            unidade: { $first: '$unidade' },
+            dataColeta: { $first: '$dataColeta' },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            produto: '$_id.produto',
+            mercado: '$_id.mercado',
+            cnpj: '$_id.cnpj',
+            preco: 1,
+            cidade: 1,
+            municipio: 1,
+            unidade: 1,
+            dataColeta: 1,
+          },
+        },
+        { $sort: { preco: 1 } },
+        { $limit: limite },
+      ]).exec();
+
+      return resultado;
+    } catch (err) {
+      throw new RepositoryError(`Falha ao buscar preços para EAN "${ean}"`, err);
     }
   }
 

@@ -12,6 +12,7 @@ export interface IPreco {
   cidade: string;
   municipio?: string;
   unidade?: string;
+  ean?: string;
   dataColeta: Date;
   /** Rastreabilidade: via qual estratégia foi coletado */
   fonte: 'api' | 'html';
@@ -60,6 +61,12 @@ const precoSchema = new Schema<IPreco>(
     unidade: {
       type: String,
       trim: true,
+    },
+    ean: {
+      type: String,
+      trim: true,
+      index: true,
+      sparse: true,
     },
     dataColeta: {
       type: Date,

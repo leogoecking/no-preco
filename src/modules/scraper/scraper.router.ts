@@ -1,12 +1,12 @@
 import { Router } from 'express';
-import { buscar, historico } from './scraper.controller';
+import { buscar, buscarPorEan, historico } from './scraper.controller';
 import { limiterLeitura } from '../../shared/middleware/rate-limiter';
 
 export const scraperRouter = Router();
 
 /**
  * GET /buscar?produto=arroz&cidade=teixeira-de-freitas&dias=7&limite=50
- * GET /produtos/buscar?termo=arroz&municipio=Salvador&dias=7&limite=50
+ * GET /produtos/buscar?termo=arroz&municipio=Teixeira%20de%20Freitas&dias=7&limite=50
  *
  * Lê do banco de dados — resposta imediata, sem scraping ao vivo.
  * Retorna o preço mais recente por mercado para o termo buscado.
@@ -16,7 +16,15 @@ scraperRouter.get('/buscar', limiterLeitura, buscar);
 scraperRouter.get('/produtos/buscar', limiterLeitura, buscar);
 
 /**
- * GET /produtos/historico?produto=arroz&municipio=Salvador&limite=50
+ * GET /buscar/ean/:ean?municipio=Teixeira+de+Freitas
+ *
+ * Busca por código de barras EAN/GTIN (8, 12, 13 ou 14 dígitos).
+ * Consulta o banco primeiro; se sem dados recentes, faz scrape ao vivo.
+ */
+scraperRouter.get('/buscar/ean/:ean', limiterLeitura, buscarPorEan);
+
+/**
+ * GET /produtos/historico?produto=arroz&municipio=Teixeira%20de%20Freitas&limite=50
  *
  * Histórico completo de um produto.
  * Filtros opcionais: dataInicio, dataFim (ISO 8601), municipio, limite.

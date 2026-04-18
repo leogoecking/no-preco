@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { precoRepository } from '../preco/preco.repository';
+import { buscarProdutos } from './scraper.service';
 import { buildKey, cacheRapido } from '../../shared/cache/app-cache';
 
 // ─────────────────────────────────────────────
@@ -64,6 +65,84 @@ export async function buscar(req: Request, res: Response): Promise<void> {
   } catch (err) {
     console.error('[controller] Erro ao buscar no banco:', err);
     res.status(500).json({ erro: 'Erro ao consultar o banco de dados.' });
+  }
+}
+
+// ─────────────────────────────────────────────
+// GET /buscar/ean/:ean?municipio=Teixeira+de+Freitas&cidade=teixeira-de-freitas
+//
+// Busca por código de barras EAN/GTIN (8, 12, 13 ou 14 dígitos).
+// Fluxo:
+//   1. Verifica no banco se há dados recentes (últimos 7 dias)
+//   2. Se não há, faz scrape ao vivo usando o EAN como termo de busca
+//   3. Salva os resultados no banco para consultas futuras
+// ─────────────────────────────────────────────
+
+export async function buscarPorEan(req: Request, res: Response): Promise<void> {
+  const ean = String(req.params['ean'] ?? '').trim().replace(/\D/g, '');
+  const cidade = req.query['cidade'] ? String(req.query['cidade']).trim() : undefined;
+  const municipio = req.query['municipio'] ? String(req.query['municipio']).trim() : undefined;
+  const cidadeFiltro = cidade ?? municipio;
+
+  if (!/^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(ean)) {
+    res.status(400).json({
+      erro: 'EAN/GTIN inválido. Deve conter 8, 12, 13 ou 14 dígitos numéricos.',
+      exemplo: '/buscar/ean/7891234567890',
+    });
+    return;
+  }
+
+  const chave = buildKey('ean', { ean, cidade: cidadeFiltro });
+  const cached = cacheRapido.get(chave);
+  if (cached) {
+    res.status(200).json(cached);
+    return;
+  }
+
+  try {
+    // Tenta banco primeiro (dados recentes dos últimos 7 dias)
+    let itens = await precoRepository.buscarPorEan(ean, { cidade: cidadeFiltro, diasRecentes: 7 });
+
+    let fonte: 'banco_de_dados' | 'scrape_ao_vivo' = 'banco_de_dados';
+
+    if (itens.length === 0) {
+      // Sem dados no banco — busca ao vivo na fonte
+      fonte = 'scrape_ao_vivo';
+      const resultado = await buscarProdutos({ termo: ean, ean, municipio: cidadeFiltro });
+
+      if (resultado.itens.length > 0) {
+        await precoRepository.salvarLote(resultado.itens, 'api');
+        itens = await precoRepository.buscarPorEan(ean, { cidade: cidadeFiltro, diasRecentes: 1 });
+
+        // Fallback: se o EAN não voltou salvo (API não retornou o campo), usa os itens diretos
+        if (itens.length === 0) {
+          itens = resultado.itens.map((i) => ({
+            produto: i.nome,
+            preco: i.preco,
+            mercado: i.mercado,
+            cnpj: i.cnpj,
+            cidade: i.cidade ?? i.municipio ?? '',
+            municipio: i.municipio,
+            unidade: i.unidade,
+            dataColeta: i.dataColeta ? new Date(i.dataColeta) : new Date(),
+          }));
+        }
+      }
+    }
+
+    const resposta = {
+      ean,
+      cidade: cidadeFiltro,
+      totalItens: itens.length,
+      fonte,
+      itens,
+    };
+
+    if (itens.length > 0) cacheRapido.set(chave, resposta);
+    res.status(200).json(resposta);
+  } catch (err) {
+    console.error('[controller] Erro ao buscar por EAN:', err);
+    res.status(500).json({ erro: 'Erro ao consultar preços por EAN.' });
   }
 }
 

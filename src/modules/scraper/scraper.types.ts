@@ -8,24 +8,27 @@ export interface ProdutoPreco {
   municipio?: string;
   dataColeta?: string;
   unidade?: string;
+  ean?: string;
 }
 
 /** Parâmetros aceitos pelo service de busca */
 export interface BuscaParams {
   termo: string;
   /**
-   * Nome legível do município (ex: "Salvador").
+   * Nome legível do município (ex: "Teixeira de Freitas").
    * Usado como fallback no HTML e para popular o campo `municipio` do retorno.
    */
   municipio?: string;
   /**
-   * Código IBGE do município (ex: 2927408 para Salvador).
+   * Código IBGE do município (ex: 2931350 para Teixeira de Freitas).
    * Quando fornecido, é enviado como `codmun` na API JSON — forma que o site
    * realmente aceita para filtrar por cidade com precisão.
    * Se omitido, a busca retorna resultados de todo o estado.
    */
   municipioId?: number;
   pagina?: number;
+  /** Quando fornecido, substitui `termo` na requisição — busca exata por código de barras */
+  ean?: string;
 }
 
 /** Resultado paginado */

@@ -20,9 +20,10 @@ app.get('/', (_req, res) => {
     endpoints: {
       health: '/ping',
       buscarProdutos: '/buscar?produto=arroz&cidade=teixeira-de-freitas',
+      buscarPorEan: '/buscar/ean/7891234567890?municipio=Teixeira+de+Freitas',
       historicoProdutos: '/produtos/historico?termo=arroz',
       coletaStatus: '/coleta/status',
-      analiseCarrinho: 'POST /analise/carrinho',
+      analiseCarrinho: '/analise/carrinho?municipio=Teixeira+de+Freitas&itens=arroz:2,feijao:1',
       estatisticas: '/inteligencia/estatisticas',
       volatilidade: '/inteligencia/volatilidade',
       alertas: '/inteligencia/alertas',

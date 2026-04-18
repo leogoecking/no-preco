@@ -72,7 +72,7 @@ async function buscarViaApi(params: BuscaParams): Promise<ProdutoPreco[]> {
   // A API do site usa "codmun" (código IBGE inteiro) para filtrar por município.
   // "municipio" (string) é usado apenas na estratégia HTML de fallback.
   const form = new URLSearchParams({
-    termo: params.termo,
+    termo: params.ean ?? params.termo,
     pagina: String(params.pagina ?? 1),
     ordenar: 'preco.asc',
     raio: '15',
@@ -168,6 +168,11 @@ function normalizarItemApi(item: unknown): ProdutoPreco {
         '',
     ).trim() || undefined;
 
+  const eanRaw = String(
+    produtoRaw['gtin'] ?? produtoRaw['ean'] ?? produtoRaw['codigoBarras'] ??
+    raw['gtin'] ?? raw['ean'] ?? raw['cd_gtin'] ?? raw['codigoBarras'] ?? '',
+  ).trim();
+
   return {
     nome: String(produtoRaw['descricao'] ?? raw['nome'] ?? raw['ds_produto'] ?? '').trim(),
     preco,
@@ -185,6 +190,7 @@ function normalizarItemApi(item: unknown): ProdutoPreco {
     unidade:
       String(produtoRaw['unidade'] ?? raw['unidade'] ?? raw['ds_unidade'] ?? '').trim() ||
       undefined,
+    ean: /^\d{8,14}$/.test(eanRaw) ? eanRaw : undefined,
   };
 }
 
