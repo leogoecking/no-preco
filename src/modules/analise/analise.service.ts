@@ -54,7 +54,7 @@ export async function analisarCarrinho(input: AnaliseInput): Promise<ResultadoAn
  * Mercados sem todos os itens são ranqueados pela cobertura + custo parcial.
  * Retorna o melhor candidato.
  */
-function calcularMercadoUnico(
+export function calcularMercadoUnico(
   itens: Required<ItemCarrinho>[],
   matriz: MatrizPrecos,
 ): OpcaoMercadoUnico | null {
@@ -144,7 +144,7 @@ function calcularMercadoUnico(
  * independentemente de quantos mercados isso envolver.
  * Custo ótimo teórico = Σ min_mercado(preco(p)) para todo p.
  */
-function calcularCombinacaoOtima(
+export function calcularCombinacaoOtima(
   itens: Required<ItemCarrinho>[],
   matriz: MatrizPrecos,
 ): OpcaoCombinacao {
@@ -190,7 +190,7 @@ function calcularCombinacaoOtima(
 // Lógica de decisão
 // ─────────────────────────────────────────────
 
-function gerarDecisao(opcao1: OpcaoMercadoUnico | null, opcao2: OpcaoCombinacao): Decisao {
+export function gerarDecisao(opcao1: OpcaoMercadoUnico | null, opcao2: OpcaoCombinacao): Decisao {
   // Nenhum dado encontrado
   if (!opcao1 && opcao2.itens.length === 0) {
     return {
