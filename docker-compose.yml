@@ -54,6 +54,7 @@ services:
   # API Node.js
   # ────────────────────────────────────────────────────────────
   api:
+    image: ghcr.io/leogoecking/no-preco:latest
     build:
       context: .
       dockerfile: Dockerfile
