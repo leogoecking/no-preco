@@ -173,6 +173,21 @@ jobs:
           name: frontend-dist
           path: frontend/dist/
 
+      - name: Gerar .env local
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ADMIN_USER: ${{ secrets.ADMIN_USER }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          COLETA_MUNICIPIO: ${{ vars.COLETA_MUNICIPIO || 'Teixeira de Freitas' }}
+          COLETA_CRON: ${{ vars.COLETA_CRON || '0 * * * *' }}
+          COLETA_ATIVO: ${{ vars.COLETA_ATIVO || 'true' }}
+        run: |
+          printf 'DATABASE_URL=%s\nDIRECT_URL=%s\nJWT_SECRET=%s\nADMIN_USER=%s\nADMIN_PASSWORD=%s\nCOLETA_MUNICIPIO=%s\nCOLETA_CRON=%s\nCOLETA_ATIVO=%s\n' \
+            "$DATABASE_URL" "$DIRECT_URL" "$JWT_SECRET" "$ADMIN_USER" "$ADMIN_PASSWORD" \
+            "$COLETA_MUNICIPIO" "$COLETA_CRON" "$COLETA_ATIVO" > .env.deploy
+
       - name: Deploy via SSH
         run: |
           mkdir -p "$HOME/.ssh"
@@ -186,24 +201,13 @@ jobs:
           # Garante que os diretórios existem no servidor
           ssh $SSH_OPTS "$TARGET" "mkdir -p /opt/no-preco/docker /opt/no-preco/frontend/dist"
 
-          # Copia arquivos de infra
+          # Copia arquivos de infra e .env
           scp $SSH_OPTS docker-compose.yml "$TARGET:/opt/no-preco/docker-compose.yml"
           scp $SSH_OPTS docker/nginx.conf  "$TARGET:/opt/no-preco/docker/nginx.conf"
+          scp $SSH_OPTS .env.deploy        "$TARGET:/opt/no-preco/.env"
 
           # Copia o build do frontend
           scp -r $SSH_OPTS frontend/dist/. "$TARGET:/opt/no-preco/frontend/dist/"
-
-          # Cria/atualiza o .env no servidor com DATABASE_URL
-          ssh $SSH_OPTS "$TARGET" "cat > /opt/no-preco/.env << 'ENVEOF'
-DATABASE_URL=${{ secrets.DATABASE_URL }}
-DIRECT_URL=${{ secrets.DIRECT_URL }}
-JWT_SECRET=${{ secrets.JWT_SECRET }}
-ADMIN_USER=${{ secrets.ADMIN_USER }}
-ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
-COLETA_MUNICIPIO=${{ vars.COLETA_MUNICIPIO || 'Teixeira de Freitas' }}
-COLETA_CRON=${{ vars.COLETA_CRON || '0 * * * *' }}
-COLETA_ATIVO=${{ vars.COLETA_ATIVO || 'true' }}
-ENVEOF"
 
           # Reinicia os serviços
           ssh $SSH_OPTS "$TARGET" \
