@@ -1,3 +1,7 @@
+jest.mock('../modules/analise/analise.repository', () => ({
+  buscarMatrizPrecos: jest.fn(),
+}));
+
 import {
   calcularCombinacaoOtima,
   calcularMercadoUnico,

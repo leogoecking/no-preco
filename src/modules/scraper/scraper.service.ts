@@ -6,7 +6,9 @@ import { getBrowser } from '../../shared/http/browser-client';
 import { BuscaParams, ProdutoPreco, ResultadoBusca, ScraperError } from './scraper.types';
 
 const BASE_URL = 'https://precodahora.ba.gov.br';
-const ENDPOINT_PESQUISA = '/produtos/pesquisa/';
+// O site usa POST /produtos/ como endpoint de busca (confirmado via diagnóstico de rede).
+// /produtos/pesquisa/ era uma suposição inicial — não existe na API real.
+const ENDPOINT_PESQUISA = '/produtos/';
 const ENDPOINT_PAGINA = '/produtos/';
 
 const client = createHttpClient(BASE_URL);
@@ -84,13 +86,16 @@ async function buscarViaHttp(params: BuscaParams): Promise<ProdutoPreco[]> {
   if (!sessaoValida()) throw new Error('Sessão não disponível');
 
   const municipioId = params.municipioId ?? resolverMunicipioId(params.municipio);
+  const coords = resolverCoordenadas(params.municipio);
 
   const form = new URLSearchParams({
     termo: params.ean ?? params.termo,
     pagina: String(params.pagina ?? 1),
     ordenar: 'preco.asc',
     raio: '15',
-    horas: '48',
+    horas: '72', // padrão do site é 0x48 = 72h
+    latitude: String(coords.latitude),
+    longitude: String(coords.longitude),
   });
   if (municipioId != null) form.set('codmun', String(municipioId));
 
@@ -111,7 +116,7 @@ async function buscarViaHttp(params: BuscaParams): Promise<ProdutoPreco[]> {
 // Estratégia 2: Browser headless (Puppeteer)
 //
 // Abre uma Page no Chromium, executa o JS do site e intercepta
-// a resposta XHR de /produtos/pesquisa/.
+// a resposta do POST /produtos/ (endpoint real de busca, confirmado via diagnóstico).
 // Ao terminar, salva os cookies de sessão para reutilização via HTTP.
 // ─────────────────────────────────────────────
 
@@ -132,15 +137,28 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
 
     let dadosApi: unknown = null;
     page.on('response', async (response) => {
-      if (response.url().includes(ENDPOINT_PESQUISA) && dadosApi === null) {
-        try {
-          const contentType = response.headers()['content-type'] ?? '';
-          if (contentType.includes('json')) {
-            dadosApi = await response.json();
-          }
-        } catch {
-          // Resposta não era JSON
+      // Captura apenas o POST de busca — diferencia do GET da página pelo método HTTP
+      const isPossBusca =
+        response.request().method() === 'POST' &&
+        response.url().includes(ENDPOINT_PESQUISA);
+
+      if (!isPossBusca || dadosApi !== null) return;
+
+      const status = response.status();
+
+      // 429 = rate limit ativo; propaga como bloqueio para o circuit breaker
+      if (status === 429) {
+        dadosApi = { _bloqueio429: true };
+        return;
+      }
+
+      try {
+        const contentType = response.headers()['content-type'] ?? '';
+        if (contentType.includes('json')) {
+          dadosApi = await response.json();
         }
+      } catch {
+        // Resposta não era JSON — será tratada no HTML fallback
       }
     });
 
@@ -160,6 +178,12 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
     }
 
     if (dadosApi !== null) {
+      // Sentinel injetado pelo listener quando o site retorna 429
+      if ((dadosApi as Record<string, unknown>)['_bloqueio429']) {
+        throw Object.assign(new Error('Rate limit 429 detectado no POST de busca'), {
+          tipo: 'BLOQUEIO_403',
+        });
+      }
       const itens = extrairItens(dadosApi);
       if (itens.length > 0) return itens;
     }
@@ -364,13 +388,28 @@ function formatarCnpj(cnpj: string): string {
   return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
 }
 
+interface Coordenadas {
+  latitude: number;
+  longitude: number;
+}
+
+// Coordenadas centrais por município (mesma lógica do JS do site: latitude_central / longitude_central)
+const MUNICIPIOS_COORDS: Record<string, { id: number } & Coordenadas> = {
+  salvador: { id: 2927408, latitude: -12.9714, longitude: -38.5014 },
+  'teixeira-de-freitas': { id: 2931350, latitude: -17.5339, longitude: -39.7423 },
+};
+
+// Fallback: centro geográfico da Bahia (coordenada padrão do site quando nenhum município está selecionado)
+const COORDS_CENTRAL_BA: Coordenadas = { latitude: -12.9714, longitude: -38.5014 };
+
 function resolverMunicipioId(municipio?: string): number | undefined {
   if (!municipio) return undefined;
-  const municipios: Record<string, number> = {
-    salvador: 2927408,
-    'teixeira-de-freitas': 2931350,
-  };
-  return municipios[normalizarSlug(municipio)];
+  return MUNICIPIOS_COORDS[normalizarSlug(municipio)]?.id;
+}
+
+function resolverCoordenadas(municipio?: string): Coordenadas {
+  if (!municipio) return COORDS_CENTRAL_BA;
+  return MUNICIPIOS_COORDS[normalizarSlug(municipio)] ?? COORDS_CENTRAL_BA;
 }
 
 function normalizarSlug(valor: string): string {

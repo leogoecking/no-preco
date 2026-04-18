@@ -92,7 +92,7 @@ describe('ColetaWorker', () => {
   describe('execute — ciclo completo', () => {
     it('retorna relatório com sucesso quando scraper retorna itens', async () => {
       mockBuscar.mockResolvedValue(resultadoComItens());
-      mockSalvar.mockResolvedValue([{ id: '1' }]);
+      mockSalvar.mockResolvedValue(1);
 
       const worker = new ColetaWorker();
       const relatorio = await worker.execute();
