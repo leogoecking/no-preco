@@ -30,13 +30,22 @@ const mockSalvar = precoRepository.salvarLote as jest.Mock;
 // Helpers
 // ─────────────────────────────────────────────
 
-function resultadoVazio() {
-  return { itens: [], termo: '', municipio: '', totalItens: 0, pagina: 1, estrategia: 'api' as const };
+function resultadoVazio(): object {
+  return {
+    itens: [],
+    termo: '',
+    municipio: '',
+    totalItens: 0,
+    pagina: 1,
+    estrategia: 'api' as const,
+  };
 }
 
-function resultadoComItens() {
+function resultadoComItens(): object {
   return {
-    itens: [{ nome: 'Arroz', preco: 10, mercado: 'M', cnpj: '0', cidade: 'C', dataColeta: '2024-01-01' }],
+    itens: [
+      { nome: 'Arroz', preco: 10, mercado: 'M', cnpj: '0', cidade: 'C', dataColeta: '2024-01-01' },
+    ],
     termo: 'arroz',
     municipio: 'Salvador',
     totalItens: 1,

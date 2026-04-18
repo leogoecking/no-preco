@@ -169,8 +169,14 @@ function normalizarItemApi(item: unknown): ProdutoPreco {
     ).trim() || undefined;
 
   const eanRaw = String(
-    produtoRaw['gtin'] ?? produtoRaw['ean'] ?? produtoRaw['codigoBarras'] ??
-    raw['gtin'] ?? raw['ean'] ?? raw['cd_gtin'] ?? raw['codigoBarras'] ?? '',
+    produtoRaw['gtin'] ??
+      produtoRaw['ean'] ??
+      produtoRaw['codigoBarras'] ??
+      raw['gtin'] ??
+      raw['ean'] ??
+      raw['cd_gtin'] ??
+      raw['codigoBarras'] ??
+      '',
   ).trim();
 
   return {

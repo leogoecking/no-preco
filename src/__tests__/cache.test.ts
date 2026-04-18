@@ -1,4 +1,3 @@
-import NodeCache from 'node-cache';
 import { buildKey, cacheRapido, cacheLento } from '../shared/cache/app-cache';
 
 describe('buildKey', () => {

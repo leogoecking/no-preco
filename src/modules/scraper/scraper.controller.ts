@@ -79,7 +79,9 @@ export async function buscar(req: Request, res: Response): Promise<void> {
 // ─────────────────────────────────────────────
 
 export async function buscarPorEan(req: Request, res: Response): Promise<void> {
-  const ean = String(req.params['ean'] ?? '').trim().replace(/\D/g, '');
+  const ean = String(req.params['ean'] ?? '')
+    .trim()
+    .replace(/\D/g, '');
   const cidade = req.query['cidade'] ? String(req.query['cidade']).trim() : undefined;
   const municipio = req.query['municipio'] ? String(req.query['municipio']).trim() : undefined;
   const cidadeFiltro = cidade ?? municipio;
