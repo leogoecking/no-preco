@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { analisarCarrinho } from './analise.service';
 import { AnaliseInput, ItemCarrinho } from './analise.types';
+import { buildKey, cacheRapido } from '../../shared/cache/app-cache';
 
 export async function analisar(req: Request, res: Response): Promise<void> {
   const body = req.body as Record<string, unknown>;
@@ -10,7 +11,7 @@ export async function analisar(req: Request, res: Response): Promise<void> {
     res.status(400).json({
       erro: 'O campo "itens" é obrigatório e deve ser um array não vazio.',
       exemplo: {
-        municipio: 'Salvador',
+        municipio: 'Teixeira de Freitas',
         itens: [
           { produto: 'arroz 5kg', quantidade: 1 },
           { produto: 'feijão carioca 1kg', quantidade: 2 },
@@ -55,9 +56,16 @@ export async function analisar(req: Request, res: Response): Promise<void> {
   const municipio = typeof body['municipio'] === 'string' ? body['municipio'].trim() : undefined;
 
   const input: AnaliseInput = { itens, municipio };
+  const chave = buildKey('analise', { municipio, itens });
+  const cached = cacheRapido.get(chave);
+  if (cached) {
+    res.status(200).json(cached);
+    return;
+  }
 
   try {
     const resultado = await analisarCarrinho(input);
+    cacheRapido.set(chave, resultado);
     res.status(200).json(resultado);
   } catch (err) {
     console.error('[analise] Erro ao calcular:', err);

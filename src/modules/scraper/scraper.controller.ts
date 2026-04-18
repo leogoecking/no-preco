@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { precoRepository } from '../preco/preco.repository';
+import { buildKey, cacheRapido } from '../../shared/cache/app-cache';
 
 // ─────────────────────────────────────────────
 // GET /buscar?produto=arroz&cidade=teixeira-de-freitas&dias=7&limite=50
@@ -33,6 +34,13 @@ export async function buscar(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  const chave = buildKey('busca', { termo, cidade: cidadeFiltro, dias, limite });
+  const cached = cacheRapido.get(chave);
+  if (cached) {
+    res.status(200).json(cached);
+    return;
+  }
+
   try {
     const itens = await precoRepository.buscarPorTermo(termo, {
       cidade: cidadeFiltro,
@@ -40,17 +48,19 @@ export async function buscar(req: Request, res: Response): Promise<void> {
       limite,
     });
 
-    res.status(200).json({
+    const resposta = {
       produto: termo,
       cidade: cidadeFiltro,
       municipio: cidadeFiltro,
       diasConsultados: dias,
       totalItens: itens.length,
-      // Informa explicitamente a origem dos dados para o frontend
       fonte: 'banco_de_dados',
       atualizadoVia: 'coleta_agendada',
       itens,
-    });
+    };
+
+    cacheRapido.set(chave, resposta);
+    res.status(200).json(resposta);
   } catch (err) {
     console.error('[controller] Erro ao buscar no banco:', err);
     res.status(500).json({ erro: 'Erro ao consultar o banco de dados.' });
@@ -91,19 +101,35 @@ export async function historico(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  const chave = buildKey('historico', {
+    produto,
+    municipio,
+    limite,
+    dataInicio: dataInicio?.toISOString(),
+    dataFim: dataFim?.toISOString(),
+  });
+  const cached = cacheRapido.get(chave);
+  if (cached) {
+    res.status(200).json(cached);
+    return;
+  }
+
   try {
     const [itens, total] = await Promise.all([
       precoRepository.buscarHistorico(produto, { dataInicio, dataFim, municipio, limite }),
       precoRepository.contarRegistros(produto),
     ]);
 
-    res.status(200).json({
+    const resposta = {
       produto,
       municipio,
       totalRegistros: total,
       retornados: itens.length,
       itens,
-    });
+    };
+
+    cacheRapido.set(chave, resposta);
+    res.status(200).json(resposta);
   } catch (err) {
     console.error('[controller] Erro ao buscar histórico:', err);
     res.status(500).json({ erro: 'Erro ao consultar histórico no banco de dados.' });

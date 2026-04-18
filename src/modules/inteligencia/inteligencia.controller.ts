@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { obterAlertas, obterEstatisticas, obterVolatilidade } from './inteligencia.service';
 import { FiltroAlertas, FiltroEstatisticas, FiltroVolatilidade } from './inteligencia.types';
+import { buildKey, cacheLento } from '../../shared/cache/app-cache';
 
 // ─────────────────────────────────────────────
 // GET /inteligencia/estatisticas
@@ -17,9 +18,16 @@ export async function estatisticas(req: Request, res: Response): Promise<void> {
   }
 
   const filtro: FiltroEstatisticas = { municipio, dias, produtos };
+  const chave = buildKey('estat', filtro);
+  const cached = cacheLento.get(chave);
+  if (cached) {
+    res.status(200).json(cached);
+    return;
+  }
 
   try {
     const resultado = await obterEstatisticas(filtro);
+    cacheLento.set(chave, resultado);
     res.status(200).json(resultado);
   } catch (err) {
     handleError(err, res, 'estatísticas');
@@ -43,9 +51,16 @@ export async function volatilidade(req: Request, res: Response): Promise<void> {
   }
 
   const filtro: FiltroVolatilidade = { municipio, dias, limite, minimoAmostras, produtos };
+  const chave = buildKey('volat', filtro);
+  const cached = cacheLento.get(chave);
+  if (cached) {
+    res.status(200).json(cached);
+    return;
+  }
 
   try {
     const resultado = await obterVolatilidade(filtro);
+    cacheLento.set(chave, resultado);
     res.status(200).json(resultado);
   } catch (err) {
     handleError(err, res, 'volatilidade');
@@ -67,9 +82,16 @@ export async function alertas(req: Request, res: Response): Promise<void> {
   }
 
   const filtro: FiltroAlertas = { municipio, variacaoLimiar, produtos };
+  const chave = buildKey('alert', filtro);
+  const cached = cacheLento.get(chave);
+  if (cached) {
+    res.status(200).json(cached);
+    return;
+  }
 
   try {
     const resultado = await obterAlertas(filtro);
+    cacheLento.set(chave, resultado);
     res.status(200).json(resultado);
   } catch (err) {
     handleError(err, res, 'alertas');
