@@ -126,29 +126,28 @@ jobs:
     environment: production
 
     steps:
-      - name: Preparar chave SSH
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p ${{ secrets.SSH_PORT || 22 }} ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
-
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key_path: ~/.ssh/deploy_key
-          port: ${{ secrets.SSH_PORT || 22 }}
-          script: |
-            set -e
-            cd /opt/no-preco
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+        run: |
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null
 
-            echo "${{ secrets.GITHUB_TOKEN }}" \
-              | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
-            docker compose pull api
-            docker compose up -d --no-deps --wait api
-            docker image prune -f
-
-            echo "Deploy concluído: $(date -u)"
+          ssh -i "$HOME/.ssh/deploy_key" \
+            -p "$SSH_PORT" \
+            -o StrictHostKeyChecking=no \
+            "$SSH_USER@$SSH_HOST" \
+            "set -e
+             cd /opt/no-preco
+             echo '$GH_TOKEN' | docker login ghcr.io -u '$GH_ACTOR' --password-stdin
+             docker compose pull api
+             docker compose up -d --no-deps --wait api
+             docker image prune -f
+             echo 'Deploy concluído: \$(date -u)'"
