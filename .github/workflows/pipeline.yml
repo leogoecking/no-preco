@@ -68,7 +68,7 @@ jobs:
         run: npm run lint --prefix frontend
 
       - name: Type-check
-        run: npx --prefix frontend tsc -b --noEmit
+        run: cd frontend && npx tsc -b --noEmit
 
       - name: Build
         run: npm run build --prefix frontend
