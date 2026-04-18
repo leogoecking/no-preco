@@ -127,27 +127,19 @@ jobs:
 
     steps:
       - name: Deploy via SSH
-        env:
-          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_ACTOR: ${{ github.actor }}
         run: |
           mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/deploy_key"
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > "$HOME/.ssh/deploy_key"
           chmod 600 "$HOME/.ssh/deploy_key"
-          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          ssh-keyscan -p "${{ secrets.SSH_PORT || 22 }}" "${{ secrets.SSH_HOST }}" >> "$HOME/.ssh/known_hosts" 2>/dev/null
 
           ssh -i "$HOME/.ssh/deploy_key" \
-            -p "$SSH_PORT" \
+            -p "${{ secrets.SSH_PORT || 22 }}" \
             -o StrictHostKeyChecking=no \
-            "$SSH_USER@$SSH_HOST" \
-            "set -e
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            'set -e
              cd /opt/no-preco
-             echo '$GH_TOKEN' | docker login ghcr.io -u '$GH_ACTOR' --password-stdin
              docker compose pull api
              docker compose up -d --no-deps --wait api
              docker image prune -f
-             echo 'Deploy concluído: \$(date -u)'"
+             echo Deploy concluído'
