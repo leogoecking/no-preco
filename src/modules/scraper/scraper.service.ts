@@ -1,7 +1,7 @@
 import * as cheerio from 'cheerio';
 import { AxiosError } from 'axios';
 import { createHttpClient } from '../../shared/http/axios-client';
-import { buildApiHeaders, buildBrowserHeaders } from '../../shared/http/browser-headers';
+import { buildApiHeaders } from '../../shared/http/browser-headers';
 import { getBrowser } from '../../shared/http/browser-client';
 import { normalizarSlug } from '../../shared/utils/normalize';
 import { Logger } from '../../shared/logger/logger';
@@ -117,63 +117,6 @@ async function buscarViaHttp(params: BuscaParams): Promise<ProdutoPreco[]> {
 }
 
 // ─────────────────────────────────────────────
-// Estratégia 1b: Axios frio (sem sessão prévia)
-//
-// Faz um GET na homepage para capturar o csrftoken dos cookies,
-// depois executa o POST de busca diretamente com esse token.
-// É mais leve que o Puppeteer e não depende de sessão cacheada.
-// Em caso de sucesso, cacheia a sessão para reutilização imediata.
-// ─────────────────────────────────────────────
-
-async function buscarViaAxiosFrio(params: BuscaParams): Promise<ProdutoPreco[]> {
-  const getResp = await client.get<string>(ENDPOINT_PAGINA, {
-    headers: buildBrowserHeaders(),
-  });
-
-  const setCookieHeader = getResp.headers['set-cookie'];
-  if (!setCookieHeader?.length) throw new Error('Sem cookies na resposta da homepage');
-
-  const cookieStr = (Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader])
-    .map((c) => c.split(';')[0])
-    .join('; ');
-
-  const csrfMatch = cookieStr.match(/csrftoken=([^;]+)/);
-  if (!csrfMatch) throw new Error('csrftoken não encontrado nos cookies');
-
-  const csrfToken = csrfMatch[1];
-
-  const municipioId = params.municipioId ?? resolverMunicipioId(params.municipio);
-  const coords = resolverCoordenadas(params.municipio);
-
-  const form = new URLSearchParams({
-    termo: params.ean ?? params.termo,
-    pagina: String(params.pagina ?? 1),
-    ordenar: 'preco.asc',
-    raio: '15',
-    horas: '72',
-    latitude: String(coords.latitude),
-    longitude: String(coords.longitude),
-  });
-  if (municipioId != null) form.set('codmun', String(municipioId));
-
-  const response = await client.post<unknown>(ENDPOINT_PESQUISA, form, {
-    headers: {
-      ...buildApiHeaders(BASE_URL + ENDPOINT_PAGINA),
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      'X-CSRFToken': csrfToken,
-      Cookie: cookieStr,
-    },
-  });
-
-  const itens = extrairItens(response.data);
-
-  sessaoCache = { cookies: cookieStr, csrfToken, expiresAt: Date.now() + SESSAO_TTL_MS };
-  log.info('Sessão capturada via Axios frio', { validade_min: 25 });
-
-  return itens;
-}
-
-// ─────────────────────────────────────────────
 // Estratégia 2: Browser headless (Puppeteer)
 //
 // Abre uma Page no Chromium, executa o JS do site e intercepta
@@ -275,19 +218,8 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
   let itens: ProdutoPreco[] = [];
   let estrategiaUsada = 'browser';
 
-  // Estratégia 0: Axios frio — GET homepage + POST sem sessão prévia
-  if (!sessaoValida()) {
-    try {
-      itens = await comRetry(() => buscarViaAxiosFrio(params), `AxiosFrio "${params.termo}"`);
-      estrategiaUsada = 'axios-frio';
-    } catch (err) {
-      const status = (err as AxiosError).response?.status;
-      log.warn('Axios frio falhou — tentando browser', { status: status ?? 'sem_resposta' });
-    }
-  }
-
-  // Estratégia 1: HTTP com sessão cacheada (capturada pelo Axios frio ou Puppeteer)
-  if (itens.length === 0 && sessaoValida()) {
+  // Estratégia 1: HTTP com sessão cacheada (capturada pelo Puppeteer)
+  if (sessaoValida()) {
     try {
       itens = await comRetry(() => buscarViaHttp(params), `HTTP "${params.termo}"`);
       estrategiaUsada = 'http';
@@ -300,7 +232,7 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
     }
   }
 
-  // Estratégia 2: Puppeteer — quando Axios frio e sessão cacheada falharem
+  // Estratégia 2: Puppeteer — quando sessão cacheada falhar ou não existir
   if (itens.length === 0) {
     try {
       itens = await buscarViaBrowser(params);
@@ -308,7 +240,7 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
     } catch (browserErr) {
       const scraperErr = buildScraperError(
         classificarErro(browserErr),
-        'Todas as estratégias falharam (axios-frio + http + browser)',
+        'Todas as estratégias falharam (http + browser)',
         browserErr,
         BASE_URL + ENDPOINT_PESQUISA,
       );
