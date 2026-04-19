@@ -228,12 +228,13 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
       itens = await buscarViaBrowser(params);
       estrategiaUsada = 'browser';
     } catch (browserErr) {
-      throw buildScraperError(
+      const scraperErr = buildScraperError(
         classificarErro(browserErr),
         'Todas as estratégias falharam (http + browser)',
         browserErr,
         BASE_URL + ENDPOINT_PESQUISA,
       );
+      throw Object.assign(new Error(scraperErr.mensagem), scraperErr);
     }
   }
 
