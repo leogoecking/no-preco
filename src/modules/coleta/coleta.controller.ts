@@ -61,16 +61,19 @@ export function status(_req: Request, res: Response): void {
 }
 
 function coletarProdutoEspecifico(termo: string, municipio?: string): void {
-  buscarProdutos({ termo, municipio, pagina: 1 })
-    .then(async (resultado) => {
-      if (resultado.itens.length === 0) {
-        log.warn('Produto sem resultados', { termo, municipio });
-        return;
-      }
-      const salvos = await precoRepository.salvarLote(resultado.itens, 'api');
-      log.info('Produto coletado', { termo, salvos });
-    })
-    .catch((err: Error) => {
-      log.error('Erro ao coletar produto específico', { termo, erro: err.message });
-    });
+  // IIFE async garante que o .catch() cobre toda a cadeia, incluindo
+  // erros gerados após awaits internos (ex: salvarLote).
+  (async () => {
+    const resultado = await buscarProdutos({ termo, municipio, pagina: 1 });
+
+    if (resultado.itens.length === 0) {
+      log.warn('Produto sem resultados', { termo, municipio });
+      return;
+    }
+
+    const salvos = await precoRepository.salvarLote(resultado.itens, 'api');
+    log.info('Produto coletado', { termo, salvos });
+  })().catch((err: Error) => {
+    log.error('Erro ao coletar produto específico', { termo, erro: err.message });
+  });
 }

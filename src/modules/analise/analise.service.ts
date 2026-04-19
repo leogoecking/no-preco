@@ -257,7 +257,8 @@ function encontrarMenorPreco(ofertas: Map<string, Oferta>): Oferta & { mercado: 
     }
   }
 
-  return melhor!;
+  if (!melhor) throw new Error('encontrarMenorPreco chamado com Map vazio');
+  return melhor;
 }
 
 function consolidarPorMercado(itens: ItemCombinacao[]): ResumoPorMercado[] {
