@@ -18,29 +18,65 @@ export async function buscar(req: Request, res: Response): Promise<void> {
       cacheRapido,
       buildKey('busca', { termo: termoBusca, cidade: cidadeFiltro, dias, limite }),
       async () => {
-        const itens = await precoRepository.buscarPorTermo(termoBusca, {
+        let itens = await precoRepository.buscarPorTermo(termoBusca, {
           cidade: cidadeFiltro,
           diasRecentes: dias,
           limite,
         });
+
+        let fonte: 'banco_de_dados' | 'scrape_ao_vivo' = 'banco_de_dados';
+
+        if (itens.length === 0) {
+          log.info('Banco sem resultados — acionando scrape ao vivo', {
+            termo: termoBusca,
+            cidade: cidadeFiltro,
+          });
+
+          fonte = 'scrape_ao_vivo';
+          const resultado = await buscarProdutos({ termo: termoBusca, municipio: cidadeFiltro });
+
+          if (resultado.itens.length > 0) {
+            await precoRepository.salvarLote(resultado.itens, 'api');
+            itens = await precoRepository.buscarPorTermo(termoBusca, {
+              cidade: cidadeFiltro,
+              diasRecentes: 1,
+              limite,
+            });
+
+            // Fallback: usa os itens do scraper direto se o banco ainda não os indexou
+            if (itens.length === 0) {
+              itens = resultado.itens.map((i) => ({
+                produto: i.nome,
+                preco: i.preco,
+                mercado: i.mercado,
+                cnpj: i.cnpj,
+                cidade: i.cidade ?? i.municipio ?? '',
+                municipio: i.municipio,
+                unidade: i.unidade,
+                dataColeta: i.dataColeta ? new Date(i.dataColeta) : new Date(),
+              }));
+            }
+          }
+        }
+
         return {
           produto: termoBusca,
           cidade: cidadeFiltro,
           municipio: cidadeFiltro,
           diasConsultados: dias,
           totalItens: itens.length,
-          fonte: 'banco_de_dados',
-          atualizadoVia: 'coleta_agendada',
+          fonte,
+          atualizadoVia: fonte === 'banco_de_dados' ? 'coleta_agendada' : 'scrape_ao_vivo',
           itens,
         };
       },
     );
     res.status(200).json(resposta);
   } catch (err) {
-    log.error('Erro ao buscar no banco', {
+    log.error('Erro ao buscar produto', {
       erro: err instanceof Error ? err.message : String(err),
     });
-    res.status(500).json({ erro: 'Erro ao consultar o banco de dados.' });
+    res.status(500).json({ erro: 'Erro ao consultar preços.' });
   }
 }
 
