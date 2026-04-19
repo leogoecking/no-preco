@@ -4,6 +4,7 @@ import { Logger } from '../shared/logger/logger';
 
 const CRON_PADRAO = '*/30 * * * *'; // a cada 30 minutos
 const TIMEZONE = 'America/Bahia';
+const JITTER_MAX_MS = 20 * 60 * 1_000; // até 20 min de atraso aleatório por ciclo
 
 /**
  * WorkerScheduler
@@ -108,7 +109,7 @@ export class WorkerScheduler {
 
   // ── Privado ───────────────────────────────────
 
-  private disparar(): void {
+  private async disparar(): Promise<void> {
     // Verifica se o circuit breaker está ativo
     if (this.pausaAteMs !== null) {
       const restanteMs = this.pausaAteMs - Date.now();
@@ -131,6 +132,18 @@ export class WorkerScheduler {
 
     if (emExecucao) {
       this.log.warn('Disparo ignorado — worker ainda em execução no ciclo anterior');
+      return;
+    }
+
+    const jitterMs = Math.floor(Math.random() * JITTER_MAX_MS);
+    this.log.info('Aguardando jitter antes de disparar', {
+      jitterMin: +(jitterMs / 60_000).toFixed(1),
+    });
+    await sleep(jitterMs);
+
+    // Re-verifica após o jitter — ciclo anterior pode ter começado durante a espera
+    if (this.worker.getStatus().emExecucao) {
+      this.log.warn('Disparo ignorado após jitter — worker já em execução');
       return;
     }
 
