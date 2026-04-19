@@ -4,7 +4,10 @@ import { createHttpClient } from '../../shared/http/axios-client';
 import { buildApiHeaders } from '../../shared/http/browser-headers';
 import { getBrowser } from '../../shared/http/browser-client';
 import { normalizarSlug } from '../../shared/utils/normalize';
+import { Logger } from '../../shared/logger/logger';
 import { BuscaParams, ProdutoPreco, ResultadoBusca, ScraperError } from './scraper.types';
+
+const log = new Logger('Scraper');
 
 const BASE_URL = 'https://precodahora.ba.gov.br';
 // O site usa POST /produtos/ como endpoint de busca (confirmado via diagnóstico de rede).
@@ -65,9 +68,7 @@ async function comRetry<T>(fn: () => Promise<T>, contexto: string): Promise<T> {
       if (!ehErroTransiente(err) || ehUltima) throw err;
 
       const espera = DELAYS_RETRY_MS[tentativa];
-      console.warn(
-        `[scraper] ${contexto} — tentativa ${tentativa + 1} falhou. Retentar em ${espera / 1_000}s...`,
-      );
+      log.warn(`${contexto} — tentativa ${tentativa + 1} falhou`, { retentar_em_s: espera / 1_000 });
       await new Promise((resolve) => setTimeout(resolve, espera));
     }
   }
@@ -174,7 +175,7 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
     if (csrfToken) {
       const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
       sessaoCache = { cookies: cookieStr, csrfToken, expiresAt: Date.now() + SESSAO_TTL_MS };
-      console.log('[scraper] Sessão capturada via Puppeteer — válida por 25 min');
+      log.info('Sessão capturada via Puppeteer', { validade_min: 25 });
     }
 
     if (dadosApi !== null) {
@@ -212,9 +213,7 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
       estrategiaUsada = 'http';
     } catch (err) {
       const status = (err as AxiosError).response?.status;
-      console.warn(
-        `[scraper] HTTP falhou (${status ?? 'sem resposta'}) — sessão invalidada, abrindo browser...`,
-      );
+      log.warn('HTTP falhou — sessão invalidada, abrindo browser', { status: status ?? 'sem_resposta' });
       invalidarSessao();
     }
   }
@@ -236,10 +235,12 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
 
   const municipioResolvido = itens.find((i) => i.municipio)?.municipio ?? params.municipio;
 
-  console.log(
-    `[scraper] "${params.termo}" — ${itens.length} itens via ${estrategiaUsada}` +
-      (municipioResolvido ? ` (${municipioResolvido})` : ''),
-  );
+  log.info('Busca concluída', {
+    termo: params.termo,
+    itens: itens.length,
+    estrategia: estrategiaUsada,
+    ...(municipioResolvido ? { municipio: municipioResolvido } : {}),
+  });
 
   return {
     termo: params.termo,
@@ -334,7 +335,7 @@ function parseHtmlRenderizado(html: string, termoBusca: string): ProdutoPreco[] 
         tipo: 'BLOQUEIO_403',
       });
     }
-    console.warn(`[scraper] HTML renderizado sem dados para "${termoBusca}"`);
+    log.warn('HTML renderizado sem dados', { termo: termoBusca });
     return [];
   }
 
@@ -361,7 +362,7 @@ function parseHtmlRenderizado(html: string, termoBusca: string): ProdutoPreco[] 
         dataColeta: linha.find('.produto-data, td:nth-child(6)').first().text().trim() || undefined,
       });
     } catch (err) {
-      console.warn('[scraper] Falha ao parsear linha HTML:', err);
+      log.warn('Falha ao parsear linha HTML', { erro: err instanceof Error ? err.message : String(err) });
     }
   });
 

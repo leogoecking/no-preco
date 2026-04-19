@@ -12,7 +12,6 @@ import {
 export const scraperRouter = Router();
 
 scraperRouter.get('/buscar', limiterLeitura, validateQuery(BuscarQuerySchema), buscar);
-scraperRouter.get('/produtos/buscar', limiterLeitura, validateQuery(BuscarQuerySchema), buscar);
 scraperRouter.get(
   '/buscar/ean/:ean',
   limiterLeitura,
