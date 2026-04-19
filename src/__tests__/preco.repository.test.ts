@@ -55,10 +55,7 @@ describe('PrecoRepository.salvarLote', () => {
 
   it('retorna o count retornado pelo Prisma', async () => {
     mockCreateMany.mockResolvedValue({ count: 3 });
-    const result = await repo.salvarLote(
-      [produtoPreco(), produtoPreco(), produtoPreco()],
-      'api',
-    );
+    const result = await repo.salvarLote([produtoPreco(), produtoPreco(), produtoPreco()], 'api');
     expect(result).toBe(3);
   });
 
