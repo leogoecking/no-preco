@@ -9,7 +9,7 @@ import { EstatisticasQuery, VolatilidadeQuery, AlertasQuery } from './inteligenc
 const log = new Logger('InteligenciaController');
 
 export async function estatisticas(req: Request, res: Response): Promise<void> {
-  const { municipio, dias, produtos } = req.query as unknown as EstatisticasQuery;
+  const { municipio, dias, produtos } = req.validatedQuery as EstatisticasQuery;
   const filtro: FiltroEstatisticas = { municipio, dias, produtos };
 
   try {
@@ -24,7 +24,7 @@ export async function estatisticas(req: Request, res: Response): Promise<void> {
 
 export async function volatilidade(req: Request, res: Response): Promise<void> {
   const { municipio, dias, limite, minimoAmostras, produtos } =
-    req.query as unknown as VolatilidadeQuery;
+    req.validatedQuery as VolatilidadeQuery;
   const filtro: FiltroVolatilidade = { municipio, dias, limite, minimoAmostras, produtos };
 
   try {
@@ -38,7 +38,7 @@ export async function volatilidade(req: Request, res: Response): Promise<void> {
 }
 
 export async function alertas(req: Request, res: Response): Promise<void> {
-  const { municipio, variacaoLimiar, produtos } = req.query as unknown as AlertasQuery;
+  const { municipio, variacaoLimiar, produtos } = req.validatedQuery as AlertasQuery;
   const filtro: FiltroAlertas = { municipio, variacaoLimiar, produtos };
 
   try {

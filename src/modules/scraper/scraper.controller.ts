@@ -9,7 +9,7 @@ import { BuscarQuery, BuscarEanQuery, HistoricoQuery } from './scraper.schemas';
 const log = new Logger('ScraperController');
 
 export async function buscar(req: Request, res: Response): Promise<void> {
-  const { produto, termo, cidade, municipio, dias, limite } = req.query as unknown as BuscarQuery;
+  const { produto, termo, cidade, municipio, dias, limite } = req.validatedQuery as BuscarQuery;
   const termoBusca = (produto ?? termo)!;
   const cidadeFiltro = cidade ?? municipio;
 
@@ -44,7 +44,7 @@ export async function buscar(req: Request, res: Response): Promise<void> {
 
 export async function buscarPorEan(req: Request, res: Response): Promise<void> {
   const ean = req.params['ean'] as string;
-  const { cidade, municipio } = req.query as unknown as BuscarEanQuery;
+  const { cidade, municipio } = req.validatedQuery as BuscarEanQuery;
   const cidadeFiltro = cidade ?? municipio;
 
   const chave = buildKey('ean', { ean, cidade: cidadeFiltro });
@@ -92,7 +92,7 @@ export async function buscarPorEan(req: Request, res: Response): Promise<void> {
 
 export async function historico(req: Request, res: Response): Promise<void> {
   const { produto, municipio, limite, dataInicio, dataFim } =
-    req.query as unknown as HistoricoQuery;
+    req.validatedQuery as HistoricoQuery;
 
   const dataInicioDate = dataInicio ? new Date(dataInicio) : undefined;
   const dataFimDate = dataFim ? new Date(dataFim) : undefined;

@@ -14,6 +14,7 @@ export function validateQuery(schema: ZodTypeAny) {
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     req.query = result.data as any;
+    req.validatedQuery = result.data;
     next();
   };
 }
@@ -26,6 +27,7 @@ export function validateBody(schema: ZodTypeAny) {
       return;
     }
     req.body = result.data;
+    req.validatedBody = result.data;
     next();
   };
 }
@@ -41,6 +43,7 @@ export function validateParams(schema: ZodTypeAny) {
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     req.params = result.data as any;
+    req.validatedParams = result.data;
     next();
   };
 }

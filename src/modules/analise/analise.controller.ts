@@ -9,7 +9,7 @@ import { CarrinhoGetQuery, CarrinhoPostBody } from './analise.schemas';
 const log = new Logger('AnaliseController');
 
 export async function analisarGet(req: Request, res: Response): Promise<void> {
-  const { municipio, itens: itensParam } = req.query as unknown as CarrinhoGetQuery;
+  const { municipio, itens: itensParam } = req.validatedQuery as CarrinhoGetQuery;
 
   const itens: ItemCarrinho[] = [];
   const erros: string[] = [];
