@@ -9,6 +9,9 @@ import { limiterGeral, limiterAnalise } from './shared/middleware/rate-limiter';
 
 const app: Application = express();
 
+// Confia no primeiro proxy (nginx) para X-Forwarded-For — necessário para o rate limiter
+app.set('trust proxy', 1);
+
 app.use(express.json());
 
 // Rate limit geral — aplicado a todas as rotas
