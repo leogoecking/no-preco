@@ -26,7 +26,7 @@ const client = createHttpClient(BASE_URL);
 // ─────────────────────────────────────────────
 
 interface Sessao {
-  cookies: string;
+  tokenCookie: string;
   csrfToken: string;
   expiresAt: number;
 }
@@ -89,27 +89,29 @@ async function comRetry<T>(fn: () => Promise<T>, contexto: string): Promise<T> {
 async function buscarViaHttp(params: BuscaParams): Promise<ProdutoPreco[]> {
   if (!sessaoValida()) throw new Error('Sessão não disponível');
 
-  const municipioId = params.municipioId ?? resolverMunicipioId(params.municipio);
   const coords = resolverCoordenadas(params.municipio);
 
+  // Termo vai na URL (?q=), não no body — comportamento confirmado via diagnóstico
+  const url = new URL(BASE_URL + ENDPOINT_PESQUISA);
+  url.searchParams.set('q', params.ean ?? params.termo);
+  if (params.municipio) url.searchParams.set('municipio', params.municipio);
+
   const form = new URLSearchParams({
-    termo: params.ean ?? params.termo,
     pagina: String(params.pagina ?? 1),
     ordenar: 'preco.asc',
     raio: '15',
-    horas: '72', // padrão do site é 0x48 = 72h
+    horas: '72',
     latitude: String(coords.latitude),
     longitude: String(coords.longitude),
   });
-  if (municipioId != null) form.set('codmun', String(municipioId));
 
-  const response = await client.post<unknown>(ENDPOINT_PESQUISA, form, {
+  const response = await client.post<unknown>(url.toString(), form, {
     headers: {
       ...buildApiHeaders(BASE_URL + ENDPOINT_PAGINA),
       'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
       'X-Requested-With': 'XMLHttpRequest',
       'X-CSRFToken': sessaoCache!.csrfToken,
-      Cookie: sessaoCache!.cookies,
+      Cookie: `token=${sessaoCache!.tokenCookie}`,
     },
   });
 
@@ -140,8 +142,16 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
     });
 
     let dadosApi: unknown = null;
+    let capturedXCsrfToken = '';
+
+    page.on('request', (req) => {
+      // Captura o x-csrftoken assinado que o JS do site injeta no POST
+      if (req.method() === 'POST' && req.url().includes(ENDPOINT_PESQUISA)) {
+        capturedXCsrfToken = req.headers()['x-csrftoken'] ?? '';
+      }
+    });
+
     page.on('response', async (response) => {
-      // Captura apenas o POST de busca — diferencia do GET da página pelo método HTTP
       const isPossBusca =
         response.request().method() === 'POST' && response.url().includes(ENDPOINT_PESQUISA);
 
@@ -149,9 +159,14 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
 
       const status = response.status();
 
-      // 429 = rate limit ativo; propaga como bloqueio para o circuit breaker
       if (status === 429) {
         dadosApi = { _bloqueio429: true };
+        return;
+      }
+
+      // 202 = servidor ocupado / sem dados — trata como vazio sem erro
+      if (status === 202) {
+        dadosApi = { _sem_dados: true };
         return;
       }
 
@@ -181,22 +196,26 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
     await page.goto(url.toString(), { waitUntil: 'load', timeout: 45_000 });
     await waitPost; // aguarda o POST completar (ou 15s de timeout)
 
-    // Captura cookies de sessão para reutilização futura via HTTP
+    // Captura token + x-csrftoken assinado para reutilização via HTTP
     const cookies = await page.cookies();
-    const csrfToken = cookies.find((c) => c.name === 'csrftoken')?.value ?? '';
-    if (csrfToken) {
-      const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
-      sessaoCache = { cookies: cookieStr, csrfToken, expiresAt: Date.now() + SESSAO_TTL_MS };
+    const tokenCookie = cookies.find((c) => c.name === 'token')?.value ?? '';
+    if (tokenCookie && capturedXCsrfToken) {
+      sessaoCache = {
+        tokenCookie,
+        csrfToken: capturedXCsrfToken,
+        expiresAt: Date.now() + SESSAO_TTL_MS,
+      };
       log.info('Sessão capturada via Puppeteer', { validade_min: 25 });
     }
 
     if (dadosApi !== null) {
-      // Sentinel injetado pelo listener quando o site retorna 429
-      if ((dadosApi as Record<string, unknown>)['_bloqueio429']) {
+      const raw = dadosApi as Record<string, unknown>;
+      if (raw['_bloqueio429']) {
         throw Object.assign(new Error('Rate limit 429 detectado no POST de busca'), {
           tipo: 'BLOQUEIO_403',
         });
       }
+      if (raw['_sem_dados']) return [];
       const itens = extrairItens(dadosApi);
       if (itens.length > 0) return itens;
     }
@@ -419,11 +438,6 @@ const MUNICIPIOS_COORDS: Record<string, { id: number } & Coordenadas> = {
 
 // Fallback: centro geográfico da Bahia (coordenada padrão do site quando nenhum município está selecionado)
 const COORDS_CENTRAL_BA: Coordenadas = { latitude: -12.9714, longitude: -38.5014 };
-
-function resolverMunicipioId(municipio?: string): number | undefined {
-  if (!municipio) return undefined;
-  return MUNICIPIOS_COORDS[normalizarSlug(municipio)]?.id;
-}
 
 function resolverCoordenadas(municipio?: string): Coordenadas {
   if (!municipio) return COORDS_CENTRAL_BA;
