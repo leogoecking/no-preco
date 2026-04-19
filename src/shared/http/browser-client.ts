@@ -1,30 +1,25 @@
-/**
- * browser-client.ts
- *
- * Singleton de Browser Puppeteer compartilhado entre requisições.
- * Uma única instância do Chromium fica viva durante todo o processo —
- * cada coleta abre/fecha apenas uma Page, sem o custo de relançar o browser.
- */
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { Browser } from 'puppeteer';
 
-import puppeteer, { Browser } from 'puppeteer';
+puppeteer.use(StealthPlugin());
 
 let instance: Browser | null = null;
 
 export async function getBrowser(): Promise<Browser> {
   if (instance && instance.connected) return instance;
 
-  instance = await puppeteer.launch({
+  instance = (await puppeteer.launch({
     headless: true,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage', // evita crash em ambientes com /dev/shm pequeno
+      '--disable-dev-shm-usage',
       '--disable-gpu',
       '--disable-extensions',
     ],
-  });
+  })) as Browser;
 
-  // Garante limpeza se o processo encerrar de forma inesperada
   instance.on('disconnected', () => {
     instance = null;
   });

@@ -114,17 +114,18 @@ MONGO_ROOT_USER=admin
 MONGO_APP_USER=no_preco_user
 MONGO_DB=no-preco
 MONGO_PORT=27017
+MONGODB_URI=mongodb://no_preco_user:senha_app_aqui@localhost:27017/no-preco?authSource=no-preco
 
 # Servidor
 PORT=3000
 
 # Coleta automática
 COLETA_ATIVO=true
-COLETA_MUNICIPIO=Salvador
+COLETA_MUNICIPIO=Teixeira de Freitas
 COLETA_CRON=0 * * * *    # toda hora; use "* * * * *" para testar a cada minuto
 ```
 
-### 4. Suba o MongoDB com Docker
+### 4. Suba apenas o MongoDB com Docker
 
 ```bash
 docker compose up mongo -d
@@ -148,6 +149,13 @@ O servidor sobe em `http://localhost:3000` com hot reload ativado. Você verá n
 [db] Conectado ao MongoDB: mongodb://***:***@localhost:27017/no-preco
 [WorkerScheduler] Scheduler iniciado { cron: "0 * * * *", timezone: "America/Bahia" }
 [Server] Servidor iniciado { porta: 3000, coleta: true }
+```
+
+Se você já subiu a API pelo Docker Compose completo (`docker compose up --build -d`), a porta `3000` já estará ocupada pelo container `no-preco-api`. Nesse caso, pare o container da API antes de usar `npm run dev`:
+
+```bash
+docker compose stop api
+npm run dev
 ```
 
 ---
@@ -209,12 +217,12 @@ Retorna `{ status: "ok" }` se o servidor está respondendo.
 ### Produtos
 
 ```
-GET /produtos/buscar?termo=arroz&municipio=Salvador&dias=7&limite=50
+GET /produtos/buscar?termo=arroz&municipio=Teixeira%20de%20Freitas&dias=7&limite=50
 ```
 Busca no banco o preço mais recente por mercado para o termo informado. **Não faz scraping ao vivo** — consulta os dados já coletados pelo cron.
 
 ```
-GET /produtos/historico?produto=arroz 5kg&municipio=Salvador&limite=50
+GET /produtos/historico?produto=arroz 5kg&municipio=Teixeira%20de%20Freitas&limite=50
 ```
 Retorna o histórico completo de preços de um produto. Parâmetros opcionais: `dataInicio`, `dataFim` (ISO 8601).
 
@@ -229,7 +237,7 @@ Content-Type: application/json
 {}   # sem body: executa o ciclo completo da lista configurada
 { "produto": "arroz 5kg", "municipio": "Salvador" }   # produto específico
 ```
-Dispara uma coleta em background e retorna `202 Accepted` imediatamente.
+Dispara uma coleta em background e retorna `202 Accepted` imediatamente. O ciclo completo sem body usa a cidade principal configurada em `COLETA_MUNICIPIO`; informe `municipio` apenas para coletas on-demand em outras cidades.
 
 ```
 GET /coleta/status
@@ -245,7 +253,7 @@ POST /analise/carrinho
 Content-Type: application/json
 
 {
-  "municipio": "Salvador",
+  "municipio": "Teixeira de Freitas",
   "itens": [
     { "produto": "arroz 5kg",        "quantidade": 1 },
     { "produto": "feijão carioca 1kg", "quantidade": 2 }
@@ -261,17 +269,17 @@ Retorna duas opções de compra:
 ### Inteligência de preços
 
 ```
-GET /inteligencia/estatisticas?municipio=Salvador&dias=7&produtos=arroz 5kg,feijão 1kg
+GET /inteligencia/estatisticas?municipio=Teixeira%20de%20Freitas&dias=7&produtos=arroz 5kg,feijão 1kg
 ```
 Estatísticas por produto na janela de tempo: mínimo, máximo, média, preço atual e variação percentual vs. média.
 
 ```
-GET /inteligencia/volatilidade?municipio=Salvador&dias=30&limite=10
+GET /inteligencia/volatilidade?municipio=Teixeira%20de%20Freitas&dias=30&limite=10
 ```
 Ranking dos produtos mais voláteis, ordenados por coeficiente de variação (σ/μ).
 
 ```
-GET /inteligencia/alertas?municipio=Salvador&variacaoLimiar=-10
+GET /inteligencia/alertas?municipio=Teixeira%20de%20Freitas&variacaoLimiar=-10
 ```
 Produtos com preço atual abaixo da média histórica de 6 meses. `variacaoLimiar` define o percentual mínimo de queda para aparecer no alerta (padrão: `-5`).
 
@@ -279,14 +287,14 @@ Produtos com preço atual abaixo da média histórica de 6 meses. `variacaoLimia
 
 ## Coleta automática
 
-O cron job roda segundo a expressão definida em `COLETA_CRON` (padrão: `0 * * * *` — toda hora) e coleta preços de 15 produtos da cesta básica:
+O cron job roda segundo a expressão definida em `COLETA_CRON` (padrão: `0 * * * *` — toda hora) e coleta preços de 15 produtos da cesta básica apenas na cidade principal configurada em `COLETA_MUNICIPIO`:
 
 - **Cesta básica:** arroz, feijão carioca, feijão preto, açúcar, farinha de trigo, óleo de soja, macarrão, sal
 - **Proteínas:** frango, carne moída, ovos
 - **Laticínios:** leite integral, manteiga
 - **Higiene:** sabão em pó, detergente
 
-A lista completa e os municípios monitorados estão em `src/jobs/coleta.config.ts`.
+A lista completa está em `src/jobs/coleta.config.ts`. Outras cidades devem ser coletadas sob demanda via `POST /coleta/disparar` informando `municipio` no body.
 
 ### Estratégia de scraping
 
@@ -314,7 +322,7 @@ Se o site retornar bloqueio 403 em **3 ciclos consecutivos**, o scheduler pausa 
 | Variável | Padrão | Descrição |
 |---|---|---|
 | `PORT` | `3000` | Porta do servidor HTTP |
-| `MONGODB_URI` | `mongodb://localhost:27017/no-preco` | URI de conexão (sobrescreve as variáveis individuais do Mongo) |
+| `MONGODB_URI` | `mongodb://no_preco_user:senha_app@localhost:27017/no-preco?authSource=no-preco` | URI de conexão (sobrescreve as variáveis individuais do Mongo) |
 | `MONGO_ROOT_USER` | `admin` | Usuário root do MongoDB |
 | `MONGO_ROOT_PASSWORD` | — | **Obrigatório.** Senha do root |
 | `MONGO_APP_USER` | `no_preco_user` | Usuário da aplicação (acesso restrito ao banco) |
@@ -322,5 +330,5 @@ Se o site retornar bloqueio 403 em **3 ciclos consecutivos**, o scheduler pausa 
 | `MONGO_DB` | `no-preco` | Nome do banco de dados |
 | `MONGO_PORT` | `27017` | Porta exposta pelo container do MongoDB |
 | `COLETA_ATIVO` | `true` | `false` desliga o cron job sem alterar código |
-| `COLETA_MUNICIPIO` | `Salvador` | Município padrão para produtos sem município próprio |
+| `COLETA_MUNICIPIO` | `Teixeira de Freitas` | Cidade principal monitorada pelo cron job |
 | `COLETA_CRON` | `0 * * * *` | Expressão cron do agendamento |

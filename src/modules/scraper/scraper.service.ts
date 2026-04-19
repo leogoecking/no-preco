@@ -169,7 +169,17 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
     url.searchParams.set('q', params.ean ?? params.termo);
     if (params.municipio) url.searchParams.set('municipio', params.municipio);
 
-    await page.goto(url.toString(), { waitUntil: 'networkidle2', timeout: 45_000 });
+    // Registra waitForResponse ANTES do goto para não perder o evento
+    // O POST de busca dispara após o load da página (via JS), não durante o load
+    const waitPost = page
+      .waitForResponse(
+        (r) => r.request().method() === 'POST' && r.url().includes(ENDPOINT_PESQUISA),
+        { timeout: 15_000 },
+      )
+      .catch(() => null);
+
+    await page.goto(url.toString(), { waitUntil: 'load', timeout: 45_000 });
+    await waitPost; // aguarda o POST completar (ou 15s de timeout)
 
     // Captura cookies de sessão para reutilização futura via HTTP
     const cookies = await page.cookies();
