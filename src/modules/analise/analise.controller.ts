@@ -45,7 +45,9 @@ export async function analisarGet(req: Request, res: Response): Promise<void> {
     );
     res.status(200).json(resultado);
   } catch (err) {
-    log.error('Erro ao calcular análise', { erro: err instanceof Error ? err.message : String(err) });
+    log.error('Erro ao calcular análise', {
+      erro: err instanceof Error ? err.message : String(err),
+    });
     res.status(500).json({ erro: 'Erro interno ao processar a análise.' });
   }
 }
@@ -60,7 +62,9 @@ export async function analisar(req: Request, res: Response): Promise<void> {
     );
     res.status(200).json(resultado);
   } catch (err) {
-    log.error('Erro ao calcular análise', { erro: err instanceof Error ? err.message : String(err) });
+    log.error('Erro ao calcular análise', {
+      erro: err instanceof Error ? err.message : String(err),
+    });
     res.status(500).json({ erro: 'Erro interno ao processar a análise.' });
   }
 }

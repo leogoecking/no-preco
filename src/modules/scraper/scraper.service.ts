@@ -68,7 +68,9 @@ async function comRetry<T>(fn: () => Promise<T>, contexto: string): Promise<T> {
       if (!ehErroTransiente(err) || ehUltima) throw err;
 
       const espera = DELAYS_RETRY_MS[tentativa];
-      log.warn(`${contexto} — tentativa ${tentativa + 1} falhou`, { retentar_em_s: espera / 1_000 });
+      log.warn(`${contexto} — tentativa ${tentativa + 1} falhou`, {
+        retentar_em_s: espera / 1_000,
+      });
       await new Promise((resolve) => setTimeout(resolve, espera));
     }
   }
@@ -213,7 +215,9 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
       estrategiaUsada = 'http';
     } catch (err) {
       const status = (err as AxiosError).response?.status;
-      log.warn('HTTP falhou — sessão invalidada, abrindo browser', { status: status ?? 'sem_resposta' });
+      log.warn('HTTP falhou — sessão invalidada, abrindo browser', {
+        status: status ?? 'sem_resposta',
+      });
       invalidarSessao();
     }
   }
@@ -362,7 +366,9 @@ function parseHtmlRenderizado(html: string, termoBusca: string): ProdutoPreco[] 
         dataColeta: linha.find('.produto-data, td:nth-child(6)').first().text().trim() || undefined,
       });
     } catch (err) {
-      log.warn('Falha ao parsear linha HTML', { erro: err instanceof Error ? err.message : String(err) });
+      log.warn('Falha ao parsear linha HTML', {
+        erro: err instanceof Error ? err.message : String(err),
+      });
     }
   });
 
@@ -412,7 +418,6 @@ function resolverCoordenadas(municipio?: string): Coordenadas {
   if (!municipio) return COORDS_CENTRAL_BA;
   return MUNICIPIOS_COORDS[normalizarSlug(municipio)] ?? COORDS_CENTRAL_BA;
 }
-
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

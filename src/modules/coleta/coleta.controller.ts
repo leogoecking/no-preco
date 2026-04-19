@@ -63,7 +63,7 @@ export function status(_req: Request, res: Response): void {
 function coletarProdutoEspecifico(termo: string, municipio?: string): void {
   // IIFE async garante que o .catch() cobre toda a cadeia, incluindo
   // erros gerados após awaits internos (ex: salvarLote).
-  (async () => {
+  (async (): Promise<void> => {
     const resultado = await buscarProdutos({ termo, municipio, pagina: 1 });
 
     if (resultado.itens.length === 0) {

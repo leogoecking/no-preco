@@ -199,7 +199,6 @@ export async function buscarAlertasMinHistorico(filtro: FiltroAlertas): Promise<
   );
 }
 
-
 function buildWhereFragments(
   municipio?: string,
   produtos?: string[],

@@ -37,7 +37,9 @@ export async function buscar(req: Request, res: Response): Promise<void> {
     );
     res.status(200).json(resposta);
   } catch (err) {
-    log.error('Erro ao buscar no banco', { erro: err instanceof Error ? err.message : String(err) });
+    log.error('Erro ao buscar no banco', {
+      erro: err instanceof Error ? err.message : String(err),
+    });
     res.status(500).json({ erro: 'Erro ao consultar o banco de dados.' });
   }
 }
@@ -91,8 +93,7 @@ export async function buscarPorEan(req: Request, res: Response): Promise<void> {
 }
 
 export async function historico(req: Request, res: Response): Promise<void> {
-  const { produto, municipio, limite, dataInicio, dataFim } =
-    req.validatedQuery as HistoricoQuery;
+  const { produto, municipio, limite, dataInicio, dataFim } = req.validatedQuery as HistoricoQuery;
 
   const dataInicioDate = dataInicio ? new Date(dataInicio) : undefined;
   const dataFimDate = dataFim ? new Date(dataFim) : undefined;
@@ -116,7 +117,9 @@ export async function historico(req: Request, res: Response): Promise<void> {
     );
     res.status(200).json(resposta);
   } catch (err) {
-    log.error('Erro ao buscar histórico', { erro: err instanceof Error ? err.message : String(err) });
+    log.error('Erro ao buscar histórico', {
+      erro: err instanceof Error ? err.message : String(err),
+    });
     res.status(500).json({ erro: 'Erro ao consultar histórico no banco de dados.' });
   }
 }
