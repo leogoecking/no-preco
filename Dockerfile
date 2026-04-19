@@ -20,7 +20,8 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+# --ignore-scripts evita postinstall (prisma generate) antes do schema estar disponível
+RUN npm ci --ignore-scripts
 
 COPY tsconfig.json ./
 COPY prisma ./prisma
