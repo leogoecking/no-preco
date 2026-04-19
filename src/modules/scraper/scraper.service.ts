@@ -3,6 +3,7 @@ import { AxiosError } from 'axios';
 import { createHttpClient } from '../../shared/http/axios-client';
 import { buildApiHeaders } from '../../shared/http/browser-headers';
 import { getBrowser } from '../../shared/http/browser-client';
+import { normalizarSlug } from '../../shared/utils/normalize';
 import { BuscaParams, ProdutoPreco, ResultadoBusca, ScraperError } from './scraper.types';
 
 const BASE_URL = 'https://precodahora.ba.gov.br';
@@ -411,15 +412,6 @@ function resolverCoordenadas(municipio?: string): Coordenadas {
   return MUNICIPIOS_COORDS[normalizarSlug(municipio)] ?? COORDS_CENTRAL_BA;
 }
 
-function normalizarSlug(valor: string): string {
-  return valor
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

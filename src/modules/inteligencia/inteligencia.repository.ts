@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/database/prisma';
+import { diasAtras } from '../../shared/utils/date';
 import {
   AlertaPreco,
   EstatisticaProduto,
@@ -198,15 +199,6 @@ export async function buscarAlertasMinHistorico(filtro: FiltroAlertas): Promise<
   );
 }
 
-// ─────────────────────────────────────────────
-// Utilitários internos
-// ─────────────────────────────────────────────
-
-function diasAtras(n: number): Date {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d;
-}
 
 function buildWhereFragments(
   municipio?: string,

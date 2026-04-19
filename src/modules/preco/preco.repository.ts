@@ -1,5 +1,7 @@
 import { Prisma, Fonte } from '@prisma/client';
 import { prisma } from '../../shared/database/prisma';
+import { diasAtras } from '../../shared/utils/date';
+import { normalizarSlug } from '../../shared/utils/normalize';
 import { PrecoRow } from './preco.model';
 import { ProdutoPreco } from '../scraper/scraper.types';
 
@@ -202,21 +204,7 @@ export class RepositoryError extends Error {
   }
 }
 
-function normalizarCidade(valor: string): string {
-  return valor
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-function diasAtras(n: number): Date {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d;
-}
+const normalizarCidade = normalizarSlug;
 
 type PrismaPreco = {
   id: number;
