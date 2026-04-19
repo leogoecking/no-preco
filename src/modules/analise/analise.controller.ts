@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { analisarCarrinho } from './analise.service';
 import { AnaliseInput, ItemCarrinho } from './analise.types';
 import { buildKey, cacheRapido } from '../../shared/cache/app-cache';
+import { withCache } from '../../shared/cache/with-cache';
 import { CarrinhoGetQuery, CarrinhoPostBody } from './analise.schemas';
 
 export async function analisarGet(req: Request, res: Response): Promise<void> {
@@ -34,17 +35,11 @@ export async function analisarGet(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const input: AnaliseInput = { itens, municipio };
-  const chave = buildKey('analise', { municipio, itens });
-  const cached = cacheRapido.get(chave);
-  if (cached) {
-    res.status(200).json(cached);
-    return;
-  }
-
   try {
-    const resultado = await analisarCarrinho(input);
-    cacheRapido.set(chave, resultado);
+    const input: AnaliseInput = { itens, municipio };
+    const resultado = await withCache(cacheRapido, buildKey('analise', { municipio, itens }), () =>
+      analisarCarrinho(input),
+    );
     res.status(200).json(resultado);
   } catch (err) {
     console.error('[analise] Erro ao calcular:', err);
@@ -55,17 +50,11 @@ export async function analisarGet(req: Request, res: Response): Promise<void> {
 export async function analisar(req: Request, res: Response): Promise<void> {
   const { municipio, itens } = req.body as CarrinhoPostBody;
 
-  const input: AnaliseInput = { itens, municipio };
-  const chave = buildKey('analise', { municipio, itens });
-  const cached = cacheRapido.get(chave);
-  if (cached) {
-    res.status(200).json(cached);
-    return;
-  }
-
   try {
-    const resultado = await analisarCarrinho(input);
-    cacheRapido.set(chave, resultado);
+    const input: AnaliseInput = { itens, municipio };
+    const resultado = await withCache(cacheRapido, buildKey('analise', { municipio, itens }), () =>
+      analisarCarrinho(input),
+    );
     res.status(200).json(resultado);
   } catch (err) {
     console.error('[analise] Erro ao calcular:', err);
