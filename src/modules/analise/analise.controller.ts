@@ -3,7 +3,10 @@ import { analisarCarrinho } from './analise.service';
 import { AnaliseInput, ItemCarrinho } from './analise.types';
 import { buildKey, cacheRapido } from '../../shared/cache/app-cache';
 import { withCache } from '../../shared/cache/with-cache';
+import { Logger } from '../../shared/logger/logger';
 import { CarrinhoGetQuery, CarrinhoPostBody } from './analise.schemas';
+
+const log = new Logger('AnaliseController');
 
 export async function analisarGet(req: Request, res: Response): Promise<void> {
   const { municipio, itens: itensParam } = req.query as unknown as CarrinhoGetQuery;
@@ -42,7 +45,7 @@ export async function analisarGet(req: Request, res: Response): Promise<void> {
     );
     res.status(200).json(resultado);
   } catch (err) {
-    console.error('[analise] Erro ao calcular:', err);
+    log.error('Erro ao calcular análise', { erro: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ erro: 'Erro interno ao processar a análise.' });
   }
 }
@@ -57,7 +60,7 @@ export async function analisar(req: Request, res: Response): Promise<void> {
     );
     res.status(200).json(resultado);
   } catch (err) {
-    console.error('[analise] Erro ao calcular:', err);
+    log.error('Erro ao calcular análise', { erro: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ erro: 'Erro interno ao processar a análise.' });
   }
 }

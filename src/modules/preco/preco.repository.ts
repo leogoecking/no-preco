@@ -2,8 +2,11 @@ import { Prisma, Fonte } from '@prisma/client';
 import { prisma } from '../../shared/database/prisma';
 import { diasAtras } from '../../shared/utils/date';
 import { normalizarSlug } from '../../shared/utils/normalize';
+import { Logger } from '../../shared/logger/logger';
 import { PrecoRow } from './preco.model';
 import { ProdutoPreco } from '../scraper/scraper.types';
+
+const log = new Logger('PrecoRepository');
 
 // ─────────────────────────────────────────────
 // Interfaces públicas
@@ -67,7 +70,7 @@ export class PrecoRepository implements IPrecoRepository {
 
     try {
       const result = await prisma.preco.createMany({ data, skipDuplicates: false });
-      console.log(`[repository] ${result.count}/${itens.length} preços salvos`);
+      log.info('Preços salvos', { salvos: result.count, total: itens.length });
       return result.count;
     } catch (err) {
       throw new RepositoryError('Falha ao salvar lote de preços', err);

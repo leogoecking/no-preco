@@ -3,7 +3,10 @@ import { precoRepository } from '../preco/preco.repository';
 import { buscarProdutos } from './scraper.service';
 import { buildKey, cacheRapido } from '../../shared/cache/app-cache';
 import { withCache } from '../../shared/cache/with-cache';
+import { Logger } from '../../shared/logger/logger';
 import { BuscarQuery, BuscarEanQuery, HistoricoQuery } from './scraper.schemas';
+
+const log = new Logger('ScraperController');
 
 export async function buscar(req: Request, res: Response): Promise<void> {
   const { produto, termo, cidade, municipio, dias, limite } = req.query as unknown as BuscarQuery;
@@ -34,7 +37,7 @@ export async function buscar(req: Request, res: Response): Promise<void> {
     );
     res.status(200).json(resposta);
   } catch (err) {
-    console.error('[controller] Erro ao buscar no banco:', err);
+    log.error('Erro ao buscar no banco', { erro: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ erro: 'Erro ao consultar o banco de dados.' });
   }
 }
@@ -82,7 +85,7 @@ export async function buscarPorEan(req: Request, res: Response): Promise<void> {
     if (itens.length > 0) cacheRapido.set(chave, resposta);
     res.status(200).json(resposta);
   } catch (err) {
-    console.error('[controller] Erro ao buscar por EAN:', err);
+    log.error('Erro ao buscar por EAN', { erro: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ erro: 'Erro ao consultar preços por EAN.' });
   }
 }
@@ -113,7 +116,7 @@ export async function historico(req: Request, res: Response): Promise<void> {
     );
     res.status(200).json(resposta);
   } catch (err) {
-    console.error('[controller] Erro ao buscar histórico:', err);
+    log.error('Erro ao buscar histórico', { erro: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ erro: 'Erro ao consultar histórico no banco de dados.' });
   }
 }

@@ -3,7 +3,10 @@ import { obterAlertas, obterEstatisticas, obterVolatilidade } from './inteligenc
 import { FiltroAlertas, FiltroEstatisticas, FiltroVolatilidade } from './inteligencia.types';
 import { buildKey, cacheLento } from '../../shared/cache/app-cache';
 import { withCache } from '../../shared/cache/with-cache';
+import { Logger } from '../../shared/logger/logger';
 import { EstatisticasQuery, VolatilidadeQuery, AlertasQuery } from './inteligencia.schemas';
+
+const log = new Logger('InteligenciaController');
 
 export async function estatisticas(req: Request, res: Response): Promise<void> {
   const { municipio, dias, produtos } = req.query as unknown as EstatisticasQuery;
@@ -49,6 +52,6 @@ export async function alertas(req: Request, res: Response): Promise<void> {
 }
 
 function handleError(err: unknown, res: Response, contexto: string): void {
-  console.error(`[inteligencia] Erro em ${contexto}:`, err);
+  log.error(`Erro em ${contexto}`, { erro: err instanceof Error ? err.message : String(err) });
   res.status(500).json({ erro: `Erro interno ao calcular ${contexto}.` });
 }
