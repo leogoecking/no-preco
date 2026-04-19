@@ -190,30 +190,32 @@ jobs:
 
       - name: Deploy via SSH
         run: |
+          set -euo pipefail
+
           mkdir -p "$HOME/.ssh"
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > "$HOME/.ssh/deploy_key"
           chmod 600 "$HOME/.ssh/deploy_key"
-          ssh-keyscan -p "${{ secrets.SSH_PORT || 22 }}" "${{ secrets.SSH_HOST }}" >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          ssh-keyscan -p "${{ secrets.SSH_PORT || 22 }}" "${{ secrets.SSH_HOST }}" >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
 
-          SSH_OPTS="-i $HOME/.ssh/deploy_key -p ${{ secrets.SSH_PORT || 22 }} -o StrictHostKeyChecking=no"
+          SSH_OPTS="-i $HOME/.ssh/deploy_key -p ${{ secrets.SSH_PORT || 22 }} -o StrictHostKeyChecking=no -o ConnectTimeout=15"
           TARGET="${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
 
-          # Garante que os diretórios existem no servidor
+          echo "→ Criando diretórios no servidor"
           ssh $SSH_OPTS "$TARGET" "mkdir -p /opt/no-preco/docker /opt/no-preco/frontend/dist"
 
-          # Copia arquivos de infra e .env
+          echo "→ Copiando arquivos de infra"
           scp $SSH_OPTS docker-compose.yml "$TARGET:/opt/no-preco/docker-compose.yml"
           scp $SSH_OPTS docker/nginx.conf  "$TARGET:/opt/no-preco/docker/nginx.conf"
           scp $SSH_OPTS .env.deploy        "$TARGET:/opt/no-preco/.env"
 
-          # Copia o build do frontend
+          echo "→ Copiando frontend dist"
           scp -r $SSH_OPTS frontend/dist/. "$TARGET:/opt/no-preco/frontend/dist/"
 
-          # Reinicia os serviços
+          echo "→ Reiniciando serviços"
           ssh $SSH_OPTS "$TARGET" \
             'set -e
              cd /opt/no-preco
              docker compose pull api
              docker compose up -d --no-deps --wait api nginx
              docker image prune -f
-             echo Deploy concluído'
+             echo "Deploy concluído"'
