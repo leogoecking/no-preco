@@ -17,8 +17,8 @@
     "backfill:cidade": "ts-node --transpile-only src/scripts/backfill-cidade.ts",
     "test": "jest",
     "test:coverage": "jest --coverage",
-    "redeploy": "docker compose build api && docker compose up -d",
-    "redeploy:clean": "docker compose build --no-cache api && docker compose up -d",
+    "redeploy": "docker compose build api && docker compose up -d --force-recreate",
+    "redeploy:clean": "docker compose build --no-cache api && docker compose up -d --force-recreate",
     "postinstall": "prisma generate"
   },
   "dependencies": {

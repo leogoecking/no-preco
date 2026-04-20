@@ -1,8 +1,6 @@
 import * as cheerio from 'cheerio';
 import { AxiosError } from 'axios';
-import { createHttpClient } from '../../shared/http/axios-client';
-import { buildApiHeaders } from '../../shared/http/browser-headers';
-import { getBrowser } from '../../shared/http/browser-client';
+import { getSharedPage, invalidateSharedPage } from '../../shared/http/browser-client';
 import { normalizarSlug } from '../../shared/utils/normalize';
 import { Logger } from '../../shared/logger/logger';
 import { BuscaParams, ProdutoPreco, ResultadoBusca, ScraperError } from './scraper.types';
@@ -11,260 +9,120 @@ const log = new Logger('Scraper');
 
 const BASE_URL = 'https://precodahora.ba.gov.br';
 // O site usa POST /produtos/ como endpoint de busca (confirmado via diagnóstico de rede).
-// /produtos/pesquisa/ era uma suposição inicial — não existe na API real.
 const ENDPOINT_PESQUISA = '/produtos/';
-const ENDPOINT_PAGINA = '/produtos/';
-
-const client = createHttpClient(BASE_URL);
 
 // ─────────────────────────────────────────────
-// Cache de sessão Django
+// Estratégia única: Page compartilhada (Puppeteer)
 //
-// O Puppeteer carrega a página uma vez, captura os cookies de sessão
-// (incluindo csrftoken) e os armazena aqui. Buscas subsequentes usam
-// Axios diretamente — sem abrir browser — até a sessão expirar.
-// ─────────────────────────────────────────────
-
-interface Sessao {
-  tokenCookie: string;
-  csrfToken: string;
-  expiresAt: number;
-}
-
-const SESSAO_TTL_MS = 25 * 60 * 1000; // 25 minutos
-let sessaoCache: Sessao | null = null;
-
-function sessaoValida(): boolean {
-  return sessaoCache !== null && Date.now() < sessaoCache.expiresAt;
-}
-
-function invalidarSessao(): void {
-  sessaoCache = null;
-}
-
-// ─────────────────────────────────────────────
-// Retry com backoff exponencial
-// ─────────────────────────────────────────────
-
-const DELAYS_RETRY_MS = [2_000, 4_000] as const;
-
-function ehErroTransiente(err: unknown): boolean {
-  const axiosErr = err as AxiosError;
-  const status = axiosErr.response?.status;
-  if (status === 403 || status === 429) return false;
-  if (!axiosErr.response) return true;
-  return status !== undefined && status >= 500;
-}
-
-async function comRetry<T>(fn: () => Promise<T>, contexto: string): Promise<T> {
-  let ultimoErro: unknown;
-
-  for (let tentativa = 0; tentativa <= DELAYS_RETRY_MS.length; tentativa++) {
-    try {
-      return await fn();
-    } catch (err) {
-      ultimoErro = err;
-      const ehUltima = tentativa === DELAYS_RETRY_MS.length;
-      if (!ehErroTransiente(err) || ehUltima) throw err;
-
-      const espera = DELAYS_RETRY_MS[tentativa];
-      log.warn(`${contexto} — tentativa ${tentativa + 1} falhou`, {
-        retentar_em_s: espera / 1_000,
-      });
-      await new Promise((resolve) => setTimeout(resolve, espera));
-    }
-  }
-
-  throw ultimoErro;
-}
-
-// ─────────────────────────────────────────────
-// Estratégia 1: HTTP com sessão cacheada (via rápida)
-//
-// Usa os cookies + csrftoken capturados pelo Puppeteer para
-// fazer requisições diretas sem abrir browser.
-// Falha imediatamente se a sessão estiver expirada.
-// ─────────────────────────────────────────────
-
-async function buscarViaHttp(params: BuscaParams): Promise<ProdutoPreco[]> {
-  if (!sessaoValida()) throw new Error('Sessão não disponível');
-
-  const coords = resolverCoordenadas(params.municipio);
-
-  // Termo vai na URL (?q=), não no body — comportamento confirmado via diagnóstico
-  const url = new URL(BASE_URL + ENDPOINT_PESQUISA);
-  url.searchParams.set('q', params.ean ?? params.termo);
-  if (params.municipio) url.searchParams.set('municipio', params.municipio);
-
-  const form = new URLSearchParams({
-    pagina: String(params.pagina ?? 1),
-    ordenar: 'preco.asc',
-    raio: '15',
-    horas: '72',
-    latitude: String(coords.latitude),
-    longitude: String(coords.longitude),
-  });
-
-  const response = await client.post<unknown>(url.toString(), form, {
-    headers: {
-      ...buildApiHeaders(BASE_URL + ENDPOINT_PAGINA),
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      'X-Requested-With': 'XMLHttpRequest',
-      'X-CSRFToken': sessaoCache!.csrfToken,
-      Cookie: `token=${sessaoCache!.tokenCookie}`,
-    },
-  });
-
-  return extrairItens(response.data);
-}
-
-// ─────────────────────────────────────────────
-// Estratégia 2: Browser headless (Puppeteer)
-//
-// Abre uma Page no Chromium, executa o JS do site e intercepta
-// a resposta do POST /produtos/ (endpoint real de busca, confirmado via diagnóstico).
-// Ao terminar, salva os cookies de sessão para reutilização via HTTP.
+// Uma Page é aberta uma vez (via `getSharedPage`), navega para o site
+// e captura o CSRF token do POST inicial disparado pelo JS. Buscas
+// subsequentes reutilizam a mesma Page, disparando apenas um fetch
+// por produto — sem page.goto() adicional.
 // ─────────────────────────────────────────────
 
 async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
-  const browser = await getBrowser();
-  const page = await browser.newPage();
+  const { page, csrfToken } = await getSharedPage(BASE_URL, ENDPOINT_PESQUISA);
 
+  const coords = resolverCoordenadas(params.municipio);
+  const termoBusca = params.ean ?? params.termo;
+
+  const body = new URLSearchParams({
+    produto: termoBusca,
+    descricao: termoBusca,
+    termo: termoBusca,
+    horas: '72',
+    latitude: String(coords.latitude),
+    longitude: String(coords.longitude),
+    raio: '15',
+    pagina: String(params.pagina ?? 1),
+    ordenar: 'preco.asc',
+  }).toString();
+
+  let resultado: { status: number; body: string };
   try {
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      const tipo = req.resourceType();
-      if (['image', 'stylesheet', 'font', 'media'].includes(tipo)) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-
-    let dadosApi: unknown = null;
-    let capturedXCsrfToken = '';
-
-    page.on('request', (req) => {
-      // Captura o x-csrftoken assinado que o JS do site injeta no POST
-      if (req.method() === 'POST' && req.url().includes(ENDPOINT_PESQUISA)) {
-        capturedXCsrfToken = req.headers()['x-csrftoken'] ?? '';
-      }
-    });
-
-    page.on('response', async (response) => {
-      const isPossBusca =
-        response.request().method() === 'POST' && response.url().includes(ENDPOINT_PESQUISA);
-
-      if (!isPossBusca || dadosApi !== null) return;
-
-      const status = response.status();
-
-      if (status === 429) {
-        dadosApi = { _bloqueio429: true };
-        return;
-      }
-
-      // 202 = servidor ocupado / sem dados — trata como vazio sem erro
-      if (status === 202) {
-        dadosApi = { _sem_dados: true };
-        return;
-      }
-
-      try {
-        const contentType = response.headers()['content-type'] ?? '';
-        if (contentType.includes('json')) {
-          dadosApi = await response.json();
-        }
-      } catch {
-        // Resposta não era JSON — será tratada no HTML fallback
-      }
-    });
-
-    const url = new URL(BASE_URL + ENDPOINT_PAGINA);
-    url.searchParams.set('q', params.ean ?? params.termo);
-    if (params.municipio) url.searchParams.set('municipio', params.municipio);
-
-    // Registra waitForResponse ANTES do goto para não perder o evento
-    // O POST de busca dispara após o load da página (via JS), não durante o load
-    const waitPost = page
-      .waitForResponse(
-        (r) => r.request().method() === 'POST' && r.url().includes(ENDPOINT_PESQUISA),
-        { timeout: 15_000 },
-      )
-      .catch(() => null);
-
-    await page.goto(url.toString(), { waitUntil: 'load', timeout: 45_000 });
-    await waitPost; // aguarda o POST completar (ou 15s de timeout)
-
-    // Captura token + x-csrftoken assinado para reutilização via HTTP
-    const cookies = await page.cookies();
-    const tokenCookie = cookies.find((c) => c.name === 'token')?.value ?? '';
-    if (tokenCookie && capturedXCsrfToken) {
-      sessaoCache = {
-        tokenCookie,
-        csrfToken: capturedXCsrfToken,
-        expiresAt: Date.now() + SESSAO_TTL_MS,
-      };
-      log.info('Sessão capturada via Puppeteer', { validade_min: 25 });
-    }
-
-    if (dadosApi !== null) {
-      const raw = dadosApi as Record<string, unknown>;
-      if (raw['_bloqueio429']) {
-        throw Object.assign(new Error('Rate limit 429 detectado no POST de busca'), {
-          tipo: 'BLOQUEIO_403',
+    resultado = await page.evaluate(
+      async (url, csrf, payload) => {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRFToken': csrf,
+          },
+          body: payload,
+          credentials: 'include',
         });
-      }
-      if (raw['_sem_dados']) return [];
-      const itens = extrairItens(dadosApi);
-      if (itens.length > 0) return itens;
-    }
-
-    // Fallback: parse do HTML já renderizado pelo browser
-    const html = await page.content();
-    return parseHtmlRenderizado(html, params.termo);
-  } finally {
-    await page.close();
+        const texto = await resp.text();
+        return { status: resp.status, body: texto };
+      },
+      BASE_URL + ENDPOINT_PESQUISA,
+      csrfToken,
+      body,
+    );
+  } catch (err) {
+    log.warn('page.evaluate(fetch) lançou exceção', {
+      termo: params.termo,
+      erro: err instanceof Error ? err.message : String(err),
+    });
+    invalidateSharedPage();
+    throw err;
   }
+
+  log.info('POST /produtos/ disparado', {
+    status: resultado.status,
+    termo: params.termo,
+    preview: resultado.body.slice(0, 150),
+  });
+
+  if (resultado.status === 429 || resultado.status === 403) {
+    invalidateSharedPage();
+    throw Object.assign(new Error(`Rate limit ${resultado.status} no POST de busca`), {
+      tipo: 'BLOQUEIO_403',
+    });
+  }
+
+  if (resultado.status === 202) {
+    log.warn('Site retornou 202 — parâmetros rejeitados', {
+      preview: resultado.body.slice(0, 200),
+    });
+    return [];
+  }
+
+  let dadosApi: unknown = null;
+  try {
+    dadosApi = JSON.parse(resultado.body);
+  } catch {
+    log.warn('Resposta do POST não é JSON', { preview: resultado.body.slice(0, 300) });
+  }
+
+  if (dadosApi !== null) {
+    const itens = extrairItens(dadosApi);
+    if (itens.length > 0) return itens;
+  }
+
+  // Fallback: parse do HTML já renderizado pelo browser
+  const html = await page.content();
+  return parseHtmlRenderizado(html, params.termo);
 }
 
 // ─────────────────────────────────────────────
-// Orquestrador: HTTP (sessão cacheada) → Puppeteer
+// Orquestrador
 // ─────────────────────────────────────────────
 
 export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusca> {
   const pagina = params.pagina ?? 1;
   let itens: ProdutoPreco[] = [];
-  let estrategiaUsada = 'browser';
 
-  // Estratégia 1: HTTP com sessão cacheada (capturada pelo Puppeteer)
-  if (sessaoValida()) {
-    try {
-      itens = await comRetry(() => buscarViaHttp(params), `HTTP "${params.termo}"`);
-      estrategiaUsada = 'http';
-    } catch (err) {
-      const status = (err as AxiosError).response?.status;
-      log.warn('HTTP falhou — sessão invalidada, abrindo browser', {
-        status: status ?? 'sem_resposta',
-      });
-      invalidarSessao();
-    }
-  }
-
-  // Estratégia 2: Puppeteer — quando sessão cacheada falhar ou não existir
-  if (itens.length === 0) {
-    try {
-      itens = await buscarViaBrowser(params);
-      estrategiaUsada = 'browser';
-    } catch (browserErr) {
-      const scraperErr = buildScraperError(
-        classificarErro(browserErr),
-        'Todas as estratégias falharam (http + browser)',
-        browserErr,
-        BASE_URL + ENDPOINT_PESQUISA,
-      );
-      throw Object.assign(new Error(scraperErr.mensagem), scraperErr);
-    }
+  try {
+    itens = await buscarViaBrowser(params);
+  } catch (browserErr) {
+    const scraperErr = buildScraperError(
+      classificarErro(browserErr),
+      'Falha na busca via browser compartilhado',
+      browserErr,
+      BASE_URL + ENDPOINT_PESQUISA,
+    );
+    throw Object.assign(new Error(scraperErr.mensagem), scraperErr);
   }
 
   const municipioResolvido = itens.find((i) => i.municipio)?.municipio ?? params.municipio;
@@ -272,7 +130,6 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
   log.info('Busca concluída', {
     termo: params.termo,
     itens: itens.length,
-    estrategia: estrategiaUsada,
     ...(municipioResolvido ? { municipio: municipioResolvido } : {}),
   });
 
