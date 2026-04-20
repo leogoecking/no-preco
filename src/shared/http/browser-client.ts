@@ -97,10 +97,9 @@ async function inicializarPaginaCompartilhada(baseUrl: string, endpoint: string)
   // Navega uma vez para capturar o CSRF token do POST inicial disparado pelo JS.
   // A resposta 202 "sem parâmetro" é esperada aqui — só queremos o header x-csrftoken.
   const waitPost = page
-    .waitForResponse(
-      (r) => r.request().method() === 'POST' && r.url().includes(endpoint),
-      { timeout: 15_000 },
-    )
+    .waitForResponse((r) => r.request().method() === 'POST' && r.url().includes(endpoint), {
+      timeout: 15_000,
+    })
     .catch(() => null);
 
   await page.goto(baseUrl + endpoint, { waitUntil: 'load', timeout: 45_000 });
