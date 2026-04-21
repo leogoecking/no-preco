@@ -48,7 +48,13 @@ export interface ResultadoBusca {
 
 /** Erro estruturado do scraper */
 export interface ScraperError {
-  tipo: 'BLOQUEIO_403' | 'TIMEOUT' | 'PARSE_FALHOU' | 'SEM_RESULTADOS' | 'ERRO_REDE';
+  tipo:
+    | 'BLOQUEIO_403'
+    | 'BLOQUEIO_429'
+    | 'TIMEOUT'
+    | 'PARSE_FALHOU'
+    | 'SEM_RESULTADOS'
+    | 'ERRO_REDE';
   mensagem: string;
   detalhes?: string;
   urlTentada?: string;

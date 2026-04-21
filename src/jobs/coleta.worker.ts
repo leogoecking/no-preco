@@ -125,8 +125,10 @@ export class ColetaWorker {
         itensSalvos += resultado.itensSalvos ?? 0;
 
         // Aborta o ciclo inteiro se o site estiver bloqueando ativamente
-        if (resultado.tipoErro === 'BLOQUEIO_403') {
-          this.log.error('Bloqueio 403 detectado — abortando ciclo para proteger o IP');
+        if (resultado.tipoErro === 'BLOQUEIO_403' || resultado.tipoErro === 'BLOQUEIO_429') {
+          this.log.error('Bloqueio detectado — abortando ciclo para proteger o IP', {
+            tipo: resultado.tipoErro,
+          });
           this.abortController.abort();
           continue;
         }

@@ -2,9 +2,21 @@ import cron from 'node-cron';
 import { ColetaWorker, coletaWorker, RelatorioColeta, WorkerStatus } from './coleta.worker';
 import { Logger } from '../shared/logger/logger';
 
-const CRON_PADRAO = '*/30 * * * *'; // a cada 30 minutos
+const CRON_PADRAO = '0 */2 * * *'; // a cada 2 horas
 const TIMEZONE = 'America/Bahia';
 const JITTER_MAX_MS = 20 * 60 * 1_000; // até 20 min de atraso aleatório por ciclo
+
+/**
+ * Pausas progressivas do circuit breaker (ms).
+ * A cada ativação consecutiva, avança para o próximo escalão.
+ * Reseta ao primeiro ciclo sem bloqueio.
+ */
+const PAUSAS_BACKOFF_MS = [
+  60 * 60 * 1_000, // 1h
+  2 * 60 * 60 * 1_000, // 2h
+  4 * 60 * 60 * 1_000, // 4h
+  12 * 60 * 60 * 1_000, // 12h (teto)
+];
 
 /**
  * WorkerScheduler
@@ -20,10 +32,11 @@ export class WorkerScheduler {
   private task: cron.ScheduledTask | null = null;
 
   // ── Circuit Breaker ──────────────────────────
-  /** Quantos ciclos consecutivos terminaram com bloqueio 403. */
-  private consecutivos403 = 0;
-  private readonly MAX_FALHAS_403 = 3;
-  private readonly PAUSA_CIRCUIT_BREAKER_MS = 60 * 60 * 1_000; // 1 hora
+  /** Quantos ciclos consecutivos terminaram com bloqueio (403 ou 429). */
+  private consecutivosBloqueio = 0;
+  private readonly MAX_FALHAS_BLOQUEIO = 3;
+  /** Quantas vezes o breaker já ativou desde o último ciclo limpo — índice em PAUSAS_BACKOFF_MS. */
+  private ativacoesBreaker = 0;
   /** Timestamp (ms) até quando o scheduler deve ficar em silêncio. */
   private pausaAteMs: number | null = null;
 
@@ -124,7 +137,7 @@ export class WorkerScheduler {
 
       // Pausa expirou — reset automático
       this.pausaAteMs = null;
-      this.consecutivos403 = 0;
+      this.consecutivosBloqueio = 0;
       this.log.info('Circuit breaker resetado — retomando coletas normalmente');
     }
 
@@ -161,34 +174,42 @@ export class WorkerScheduler {
    * Analisa o relatório do ciclo encerrado e gerencia o circuit breaker.
    *
    * Critério de "bloqueio": ciclo foi abortado E ao menos uma tarefa
-   * falhou com BLOQUEIO_403. Qualquer ciclo bem-sucedido reseta o contador.
+   * falhou com BLOQUEIO_403 ou BLOQUEIO_429. Qualquer ciclo sem bloqueio
+   * reseta o contador.
    */
   private avaliarCircuitBreaker(relatorio: RelatorioColeta): void {
-    const teve403 =
-      relatorio.abortado && relatorio.tarefas.some((t) => t.tipoErro === 'BLOQUEIO_403');
+    const teveBloqueio =
+      relatorio.abortado &&
+      relatorio.tarefas.some((t) => t.tipoErro === 'BLOQUEIO_403' || t.tipoErro === 'BLOQUEIO_429');
 
-    if (teve403) {
-      this.consecutivos403++;
+    if (teveBloqueio) {
+      this.consecutivosBloqueio++;
 
-      this.log.warn('Bloqueio 403 registrado no ciclo', {
-        consecutivos: this.consecutivos403,
-        limiteParaPausa: this.MAX_FALHAS_403,
+      this.log.warn('Bloqueio registrado no ciclo', {
+        consecutivos: this.consecutivosBloqueio,
+        limiteParaPausa: this.MAX_FALHAS_BLOQUEIO,
       });
 
-      if (this.consecutivos403 >= this.MAX_FALHAS_403) {
-        this.pausaAteMs = Date.now() + this.PAUSA_CIRCUIT_BREAKER_MS;
+      if (this.consecutivosBloqueio >= this.MAX_FALHAS_BLOQUEIO) {
+        const escalao = Math.min(this.ativacoesBreaker, PAUSAS_BACKOFF_MS.length - 1);
+        const pausaMs = PAUSAS_BACKOFF_MS[escalao];
+        this.pausaAteMs = Date.now() + pausaMs;
+        this.ativacoesBreaker++;
+        this.consecutivosBloqueio = 0;
 
         this.log.error('Circuit breaker ativado', {
-          motivo: `${this.MAX_FALHAS_403} bloqueios 403 consecutivos`,
+          motivo: `${this.MAX_FALHAS_BLOQUEIO} bloqueios consecutivos`,
+          ativacao: this.ativacoesBreaker,
           pausaAte: new Date(this.pausaAteMs).toISOString(),
-          pausaDurMin: this.PAUSA_CIRCUIT_BREAKER_MS / 60_000,
+          pausaDurMin: pausaMs / 60_000,
         });
       }
     } else {
-      if (this.consecutivos403 > 0) {
-        this.log.info('Ciclo sem bloqueio 403 — resetando contador do circuit breaker');
+      if (this.consecutivosBloqueio > 0 || this.ativacoesBreaker > 0) {
+        this.log.info('Ciclo sem bloqueio — resetando contadores do circuit breaker');
       }
-      this.consecutivos403 = 0;
+      this.consecutivosBloqueio = 0;
+      this.ativacoesBreaker = 0;
     }
   }
 }

@@ -24,8 +24,8 @@ export interface ColetaConfig {
 export const coletaConfig: ColetaConfig = {
   cron: process.env['COLETA_CRON'] ?? '0 * * * *',
   municipioPadrao: process.env['COLETA_MUNICIPIO'] ?? 'Teixeira de Freitas',
-  delayMinMs: 5_000,
-  delayMaxMs: 10_000,
+  delayMinMs: 20_000,
+  delayMaxMs: 40_000,
 
   produtos: [
     // Cesta básica

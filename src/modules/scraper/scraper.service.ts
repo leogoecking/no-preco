@@ -76,9 +76,8 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
 
   if (resultado.status === 429 || resultado.status === 403) {
     invalidateSharedPage();
-    throw Object.assign(new Error(`Rate limit ${resultado.status} no POST de busca`), {
-      tipo: 'BLOQUEIO_403',
-    });
+    const tipo: ScraperError['tipo'] = resultado.status === 429 ? 'BLOQUEIO_429' : 'BLOQUEIO_403';
+    throw Object.assign(new Error(`Rate limit ${resultado.status} no POST de busca`), { tipo });
   }
 
   if (resultado.status === 202) {
@@ -93,6 +92,14 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
     dadosApi = JSON.parse(resultado.body);
   } catch {
     log.warn('Resposta do POST não é JSON', { preview: resultado.body.slice(0, 300) });
+  }
+
+  const bloqueio = detectarBloqueioNoBody(dadosApi);
+  if (bloqueio) {
+    invalidateSharedPage();
+    throw Object.assign(new Error(`Bloqueio embutido no body (codigo=${bloqueio.codigo})`), {
+      tipo: bloqueio.tipo,
+    });
   }
 
   if (dadosApi !== null) {
@@ -306,11 +313,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function classificarErro(err: unknown): ScraperError['tipo'] {
+  const tipoExplicito = (err as Error & { tipo?: ScraperError['tipo'] }).tipo;
+  if (tipoExplicito === 'BLOQUEIO_403' || tipoExplicito === 'BLOQUEIO_429') return tipoExplicito;
+
   const axiosErr = err as AxiosError;
   if (axiosErr.code === 'ECONNABORTED') return 'TIMEOUT';
-  if (axiosErr.response?.status === 403 || axiosErr.response?.status === 429) return 'BLOQUEIO_403';
-  if ((err as Error & { tipo?: string }).tipo === 'BLOQUEIO_403') return 'BLOQUEIO_403';
+  if (axiosErr.response?.status === 429) return 'BLOQUEIO_429';
+  if (axiosErr.response?.status === 403) return 'BLOQUEIO_403';
   return 'PARSE_FALHOU';
+}
+
+/**
+ * Detecta bloqueio quando o servidor responde HTTP 200 mas o body
+ * carrega `{codigo: 429|403, descricao: "..."}`. Sem isto, essas
+ * falhas caem em PARSE_FALHOU e mascaram o rate limit real.
+ */
+function detectarBloqueioNoBody(
+  dadosApi: unknown,
+): { codigo: number; tipo: ScraperError['tipo'] } | null {
+  if (!isRecord(dadosApi)) return null;
+  const codigo = Number(dadosApi['codigo']);
+  if (codigo === 429) return { codigo, tipo: 'BLOQUEIO_429' };
+  if (codigo === 403) return { codigo, tipo: 'BLOQUEIO_403' };
+  return null;
 }
 
 function buildScraperError(
