@@ -55,23 +55,57 @@ export class PrecoRepository implements IPrecoRepository {
   async salvarLote(itens: ProdutoPreco[], fonte: 'api' | 'html' | 'browser'): Promise<number> {
     if (itens.length === 0) return 0;
 
-    const data = itens.map((item) => ({
-      produto: item.nome.toLowerCase().trim(),
-      preco: new Prisma.Decimal(item.preco),
-      mercado: item.mercado.trim(),
-      cnpj: item.cnpj?.trim() ?? '',
-      cidade: normalizarCidade(item.cidade ?? item.municipio ?? 'desconhecida'),
-      municipio: item.municipio ?? null,
-      unidade: item.unidade ?? null,
-      ean: item.ean ?? null,
-      dataColeta: item.dataColeta ? new Date(item.dataColeta) : new Date(),
-      fonte: fonte as Fonte,
-    }));
+    let inseridos = 0;
+    let atualizados = 0;
 
     try {
-      const result = await prisma.preco.createMany({ data, skipDuplicates: false });
-      log.info('Preços salvos', { salvos: result.count, total: itens.length });
-      return result.count;
+      for (const item of itens) {
+        const produto = item.nome.toLowerCase().trim();
+        const cnpj = item.cnpj?.trim() ?? '';
+        const precoNovo = new Prisma.Decimal(item.preco);
+
+        // cnpj vazio quebra a chave natural (produto, cnpj) — insere sempre
+        // para não colapsar estabelecimentos distintos numa única linha.
+        const ultimo = cnpj
+          ? await prisma.preco.findFirst({
+              where: { produto, cnpj },
+              orderBy: { dataColeta: 'desc' },
+              select: { id: true, preco: true },
+            })
+          : null;
+
+        if (ultimo && ultimo.preco.equals(precoNovo)) {
+          await prisma.preco.update({
+            where: { id: ultimo.id },
+            data: { dataColeta: new Date() },
+          });
+          atualizados++;
+        } else {
+          await prisma.preco.create({
+            data: {
+              produto,
+              preco: precoNovo,
+              mercado: item.mercado.trim(),
+              cnpj,
+              cidade: normalizarCidade(item.cidade ?? item.municipio ?? 'desconhecida'),
+              municipio: item.municipio ?? null,
+              unidade: item.unidade ?? null,
+              ean: item.ean ?? null,
+              dataColeta: item.dataColeta ? new Date(item.dataColeta) : new Date(),
+              fonte: fonte as Fonte,
+            },
+          });
+          inseridos++;
+        }
+      }
+
+      const processados = inseridos + atualizados;
+      log.info('Preços processados', {
+        inseridos,
+        atualizados,
+        total: itens.length,
+      });
+      return processados;
     } catch (err) {
       throw new RepositoryError('Falha ao salvar lote de preços', err);
     }
