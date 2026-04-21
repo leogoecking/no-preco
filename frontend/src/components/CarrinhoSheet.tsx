@@ -2,6 +2,7 @@ import { useMutation } from '@tanstack/react-query'
 import { Minus, Plus, Trash2, ShoppingCart } from 'lucide-react'
 import { api } from '@/api/client'
 import { useCarrinho } from '@/store/carrinho'
+import { formatBRL } from '@/lib/utils'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { ResultadoAnalise } from '@/components/ResultadoAnalise'
@@ -14,6 +15,8 @@ export function CarrinhoSheet() {
   const [open, setOpen] = useState(false)
 
   const total = itens.length
+  const totalValor = itens.reduce((sum, i) => sum + (i.preco ?? 0) * i.quantidade, 0)
+  const temPreco = itens.some((i) => i.preco !== undefined)
 
   const { mutate: analisar, isPending, isError, error, reset } = useMutation({
     mutationFn: () => api.analisarCarrinho(itens),
@@ -101,6 +104,13 @@ export function CarrinhoSheet() {
                   ))}
                 </ul>
               </div>
+
+              {temPreco && (
+                <div className="flex items-center justify-between border-t border-gray-100 pt-3 pb-1">
+                  <span className="text-sm text-gray-500">Total estimado</span>
+                  <span className="text-base font-bold text-blue-600">{formatBRL(totalValor)}</span>
+                </div>
+              )}
 
               {isError && (
                 <p className="mb-2 text-xs text-red-600">{(error as Error).message}</p>

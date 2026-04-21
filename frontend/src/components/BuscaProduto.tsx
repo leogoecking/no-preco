@@ -17,14 +17,14 @@ export function BuscaProduto() {
 
   const isEan = EAN_REGEX.test(busca)
 
-  const { data: dataTermo, isFetching: fetchingTermo } = useQuery({
+  const { data: dataTermo, isFetching: fetchingTermo, isError: erroTermo, error: erroTermoMsg } = useQuery({
     queryKey: ['busca', busca],
     queryFn: () => api.buscar(busca),
     enabled: busca.length > 1 && !isEan,
     staleTime: 1000 * 60 * 5,
   })
 
-  const { data: dataEan, isFetching: fetchingEan } = useQuery({
+  const { data: dataEan, isFetching: fetchingEan, isError: erroEan, error: erroEanMsg } = useQuery({
     queryKey: ['ean', busca],
     queryFn: () => api.buscarPorEan(busca),
     enabled: isEan,
@@ -32,6 +32,8 @@ export function BuscaProduto() {
   })
 
   const isFetching = fetchingTermo || fetchingEan
+  const isError = isEan ? erroEan : erroTermo
+  const errorMsg = isEan ? erroEanMsg : erroTermoMsg
 
   const itens: ItemPreco[] = isEan
     ? (dataEan?.itens ?? [])
@@ -75,6 +77,12 @@ export function BuscaProduto() {
         </div>
       )}
 
+      {isError && !isFetching && (
+        <div className="py-8 text-center text-sm text-red-500">
+          {errorMsg instanceof Error ? errorMsg.message : 'Erro ao buscar preços. Tente novamente.'}
+        </div>
+      )}
+
       {hasData && !isFetching && (
         <>
           <div className="flex items-center justify-between flex-wrap gap-2">
@@ -113,7 +121,7 @@ export function BuscaProduto() {
                       <Button
                         size="icon"
                         variant={noCarrinho(item.produto) ? 'outline' : 'default'}
-                        onClick={() => adicionar(item.produto)}
+                        onClick={() => adicionar(item.produto, item.preco)}
                         title="Adicionar ao carrinho"
                       >
                         {noCarrinho(item.produto) ? (
