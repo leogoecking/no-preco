@@ -1,10 +1,16 @@
 import cron from 'node-cron';
 import { ColetaWorker, coletaWorker, RelatorioColeta, WorkerStatus } from './coleta.worker';
+import { GrupoColeta } from './coleta.config';
 import { Logger } from '../shared/logger/logger';
 
-const CRON_PADRAO = '0 */2 * * *'; // a cada 2 horas
+const CRON_PADRAO = '0 */6 * * *'; // a cada 6 horas (00h, 06h, 12h, 18h)
 const TIMEZONE = 'America/Bahia';
 const JITTER_MAX_MS = 20 * 60 * 1_000; // até 20 min de atraso aleatório por ciclo
+
+/** Deriva o grupo rotativo a partir do horário UTC — cada 6h alterna entre 0 e 1. */
+function grupoDoHorario(agora: Date = new Date()): GrupoColeta {
+  return (Math.floor(agora.getUTCHours() / 6) % 2) as GrupoColeta;
+}
 
 /**
  * Pausas progressivas do circuit breaker (ms).
@@ -160,10 +166,11 @@ export class WorkerScheduler {
       return;
     }
 
-    this.log.info('Disparando ciclo de coleta');
+    const grupo = grupoDoHorario();
+    this.log.info('Disparando ciclo de coleta', { grupo });
 
     this.worker
-      .execute()
+      .execute({ grupo })
       .then((relatorio) => this.avaliarCircuitBreaker(relatorio))
       .catch((err: Error) => {
         this.log.error('Erro não tratado no ciclo', { erro: err.message, stack: err.stack });

@@ -1,8 +1,13 @@
 import { buscarProdutos } from '../modules/scraper/scraper.service';
 import { precoRepository } from '../modules/preco/preco.repository';
 import { ScraperError } from '../modules/scraper/scraper.types';
-import { coletaConfig, ProdutoMonitorado } from './coleta.config';
+import { coletaConfig, GrupoColeta, ProdutoMonitorado } from './coleta.config';
 import { Logger } from '../shared/logger/logger';
+
+export interface ExecuteOptions {
+  /** Quando definido, executa apenas os produtos daquele grupo. */
+  grupo?: GrupoColeta;
+}
 
 // ─────────────────────────────────────────────
 // Tipos
@@ -90,8 +95,11 @@ export class ColetaWorker {
   /**
    * Executa um ciclo completo de coleta.
    * Se já estiver em execução, retorna o relatório anterior sem bloquear.
+   *
+   * Quando `opts.grupo` é informado, executa apenas os produtos daquele grupo
+   * (rotação de carga). Omitido → executa todos os produtos configurados.
    */
-  async execute(): Promise<RelatorioColeta> {
+  async execute(opts: ExecuteOptions = {}): Promise<RelatorioColeta> {
     if (this.isRunning) {
       this.log.warn('Ciclo já em execução — pulando disparo');
       if (!this.lastReport)
@@ -104,13 +112,14 @@ export class ColetaWorker {
     this.isRunning = true;
 
     const inicio = new Date();
-    const tarefas = this.expandirTarefas();
+    const tarefas = this.expandirTarefas(opts.grupo);
     const resultados: ResultadoTarefa[] = [];
     let itensSalvos = 0;
 
     this.log.info('Ciclo iniciado', {
       tarefas: tarefas.length,
       municipioPadrao: coletaConfig.municipioPadrao,
+      ...(opts.grupo !== undefined ? { grupo: opts.grupo } : {}),
     });
 
     try {
@@ -230,10 +239,14 @@ export class ColetaWorker {
 
   // ── Utilitários privados ─────────────────────
 
-  private expandirTarefas(): TarefaColeta[] {
+  private expandirTarefas(grupo?: GrupoColeta): TarefaColeta[] {
     const tarefas: TarefaColeta[] = [];
+    const produtos =
+      grupo === undefined
+        ? coletaConfig.produtos
+        : coletaConfig.produtos.filter((p) => p.grupo === grupo);
 
-    for (const produto of coletaConfig.produtos) {
+    for (const produto of produtos) {
       const municipios = produto.municipios ?? [coletaConfig.municipioPadrao];
       for (const municipio of municipios) {
         tarefas.push({ produto, municipio });

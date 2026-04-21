@@ -7,7 +7,7 @@ jest.mock('../jobs/coleta.config', () => ({
     delayMinMs: 0,
     delayMaxMs: 0,
     cron: '0 * * * *',
-    produtos: [{ termo: 'arroz', label: 'Arroz 5kg' }],
+    produtos: [{ termo: 'arroz', label: 'Arroz 5kg', grupo: 0 }],
   },
 }));
 jest.mock('../modules/scraper/scraper.service', () => ({

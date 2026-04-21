@@ -60,11 +60,19 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
       body,
     );
   } catch (err) {
-    log.warn('page.evaluate(fetch) lançou exceção', {
-      termo: params.termo,
-      erro: err instanceof Error ? err.message : String(err),
-    });
+    const mensagem = err instanceof Error ? err.message : String(err);
+    log.warn('page.evaluate(fetch) lançou exceção', { termo: params.termo, erro: mensagem });
     invalidateSharedPage();
+
+    // "Execution context was destroyed" = página navegou/redirecionou durante o
+    // evaluate. No site alvo isso ocorre quando um IP suspeito é redirecionado
+    // para página de erro/captcha — tratar como bloqueio ativo.
+    if (mensagem.includes('Execution context was destroyed')) {
+      throw Object.assign(new Error('Navegação forçada durante evaluate — bloqueio provável'), {
+        tipo: 'BLOQUEIO_403',
+      });
+    }
+
     throw err;
   }
 
