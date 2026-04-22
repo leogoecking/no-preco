@@ -6,6 +6,7 @@ import { coletaRouter } from './modules/coleta/coleta.router';
 import { inteligenciaRouter } from './modules/inteligencia/inteligencia.router';
 import { authRouter } from './modules/auth/auth.router';
 import { limiterGeral, limiterAnalise } from './shared/middleware/rate-limiter';
+import { errorHandler } from './shared/middleware/error-handler';
 
 const app: Application = express();
 
@@ -44,5 +45,8 @@ app.use('/api', coletaRouter);
 // Análise e inteligência têm limiter próprio por serem agregações pesadas
 app.use('/api', limiterAnalise, analiseRouter);
 app.use('/api', limiterAnalise, inteligenciaRouter);
+
+// Deve ser o último middleware — captura rejeições encaminhadas via next(err)
+app.use(errorHandler);
 
 export default app;

@@ -13,71 +13,64 @@ export async function buscar(req: Request, res: Response): Promise<void> {
   const termoBusca = (produto ?? termo)!;
   const cidadeFiltro = cidade ?? municipio;
 
-  try {
-    const resposta = await withCache(
-      cacheRapido,
-      buildKey('busca', { termo: termoBusca, cidade: cidadeFiltro, dias, limite }),
-      async () => {
-        let itens = await precoRepository.buscarPorTermo(termoBusca, {
+  const resposta = await withCache(
+    cacheRapido,
+    buildKey('busca', { termo: termoBusca, cidade: cidadeFiltro, dias, limite }),
+    async () => {
+      let itens = await precoRepository.buscarPorTermo(termoBusca, {
+        cidade: cidadeFiltro,
+        diasRecentes: dias,
+        limite,
+      });
+
+      let fonte: 'banco_de_dados' | 'scrape_ao_vivo' = 'banco_de_dados';
+
+      if (itens.length === 0) {
+        log.info('Banco sem resultados — acionando scrape ao vivo', {
+          termo: termoBusca,
           cidade: cidadeFiltro,
-          diasRecentes: dias,
-          limite,
         });
 
-        let fonte: 'banco_de_dados' | 'scrape_ao_vivo' = 'banco_de_dados';
+        fonte = 'scrape_ao_vivo';
+        const resultado = await buscarProdutos({ termo: termoBusca, municipio: cidadeFiltro });
 
-        if (itens.length === 0) {
-          log.info('Banco sem resultados — acionando scrape ao vivo', {
-            termo: termoBusca,
+        if (resultado.itens.length > 0) {
+          await precoRepository.salvarLote(resultado.itens, 'api');
+          itens = await precoRepository.buscarPorTermo(termoBusca, {
             cidade: cidadeFiltro,
+            diasRecentes: 1,
+            limite,
           });
 
-          fonte = 'scrape_ao_vivo';
-          const resultado = await buscarProdutos({ termo: termoBusca, municipio: cidadeFiltro });
-
-          if (resultado.itens.length > 0) {
-            await precoRepository.salvarLote(resultado.itens, 'api');
-            itens = await precoRepository.buscarPorTermo(termoBusca, {
-              cidade: cidadeFiltro,
-              diasRecentes: 1,
-              limite,
-            });
-
-            // Fallback: usa os itens do scraper direto se o banco ainda não os indexou
-            if (itens.length === 0) {
-              itens = resultado.itens.map((i) => ({
-                produto: i.nome,
-                preco: i.preco,
-                mercado: i.mercado,
-                cnpj: i.cnpj,
-                cidade: i.cidade ?? i.municipio ?? '',
-                municipio: i.municipio,
-                unidade: i.unidade,
-                dataColeta: i.dataColeta ? new Date(i.dataColeta) : new Date(),
-              }));
-            }
+          // Fallback: usa os itens do scraper direto se o banco ainda não os indexou
+          if (itens.length === 0) {
+            itens = resultado.itens.map((i) => ({
+              produto: i.nome,
+              preco: i.preco,
+              mercado: i.mercado,
+              cnpj: i.cnpj,
+              cidade: i.cidade ?? i.municipio ?? '',
+              municipio: i.municipio,
+              unidade: i.unidade,
+              dataColeta: i.dataColeta ? new Date(i.dataColeta) : new Date(),
+            }));
           }
         }
+      }
 
-        return {
-          produto: termoBusca,
-          cidade: cidadeFiltro,
-          municipio: cidadeFiltro,
-          diasConsultados: dias,
-          totalItens: itens.length,
-          fonte,
-          atualizadoVia: fonte === 'banco_de_dados' ? 'coleta_agendada' : 'scrape_ao_vivo',
-          itens,
-        };
-      },
-    );
-    res.status(200).json(resposta);
-  } catch (err) {
-    log.error('Erro ao buscar produto', {
-      erro: err instanceof Error ? err.message : String(err),
-    });
-    res.status(500).json({ erro: 'Erro ao consultar preços.' });
-  }
+      return {
+        produto: termoBusca,
+        cidade: cidadeFiltro,
+        municipio: cidadeFiltro,
+        diasConsultados: dias,
+        totalItens: itens.length,
+        fonte,
+        atualizadoVia: fonte === 'banco_de_dados' ? 'coleta_agendada' : 'scrape_ao_vivo',
+        itens,
+      };
+    },
+  );
+  res.status(200).json(resposta);
 }
 
 export async function buscarPorEan(req: Request, res: Response): Promise<void> {
@@ -92,40 +85,35 @@ export async function buscarPorEan(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  try {
-    let itens = await precoRepository.buscarPorEan(ean, { cidade: cidadeFiltro, diasRecentes: 7 });
-    let fonte: 'banco_de_dados' | 'scrape_ao_vivo' = 'banco_de_dados';
+  let itens = await precoRepository.buscarPorEan(ean, { cidade: cidadeFiltro, diasRecentes: 7 });
+  let fonte: 'banco_de_dados' | 'scrape_ao_vivo' = 'banco_de_dados';
 
-    if (itens.length === 0) {
-      fonte = 'scrape_ao_vivo';
-      const resultado = await buscarProdutos({ termo: ean, ean, municipio: cidadeFiltro });
+  if (itens.length === 0) {
+    fonte = 'scrape_ao_vivo';
+    const resultado = await buscarProdutos({ termo: ean, ean, municipio: cidadeFiltro });
 
-      if (resultado.itens.length > 0) {
-        await precoRepository.salvarLote(resultado.itens, 'api');
-        itens = await precoRepository.buscarPorEan(ean, { cidade: cidadeFiltro, diasRecentes: 1 });
+    if (resultado.itens.length > 0) {
+      await precoRepository.salvarLote(resultado.itens, 'api');
+      itens = await precoRepository.buscarPorEan(ean, { cidade: cidadeFiltro, diasRecentes: 1 });
 
-        if (itens.length === 0) {
-          itens = resultado.itens.map((i) => ({
-            produto: i.nome,
-            preco: i.preco,
-            mercado: i.mercado,
-            cnpj: i.cnpj,
-            cidade: i.cidade ?? i.municipio ?? '',
-            municipio: i.municipio,
-            unidade: i.unidade,
-            dataColeta: i.dataColeta ? new Date(i.dataColeta) : new Date(),
-          }));
-        }
+      if (itens.length === 0) {
+        itens = resultado.itens.map((i) => ({
+          produto: i.nome,
+          preco: i.preco,
+          mercado: i.mercado,
+          cnpj: i.cnpj,
+          cidade: i.cidade ?? i.municipio ?? '',
+          municipio: i.municipio,
+          unidade: i.unidade,
+          dataColeta: i.dataColeta ? new Date(i.dataColeta) : new Date(),
+        }));
       }
     }
-
-    const resposta = { ean, cidade: cidadeFiltro, totalItens: itens.length, fonte, itens };
-    if (itens.length > 0) cacheRapido.set(chave, resposta);
-    res.status(200).json(resposta);
-  } catch (err) {
-    log.error('Erro ao buscar por EAN', { erro: err instanceof Error ? err.message : String(err) });
-    res.status(500).json({ erro: 'Erro ao consultar preços por EAN.' });
   }
+
+  const resposta = { ean, cidade: cidadeFiltro, totalItens: itens.length, fonte, itens };
+  if (itens.length > 0) cacheRapido.set(chave, resposta);
+  res.status(200).json(resposta);
 }
 
 export async function historico(req: Request, res: Response): Promise<void> {
@@ -134,28 +122,21 @@ export async function historico(req: Request, res: Response): Promise<void> {
   const dataInicioDate = dataInicio ? new Date(dataInicio) : undefined;
   const dataFimDate = dataFim ? new Date(dataFim) : undefined;
 
-  try {
-    const resposta = await withCache(
-      cacheRapido,
-      buildKey('historico', { produto, municipio, limite, dataInicio, dataFim }),
-      async () => {
-        const [itens, total] = await Promise.all([
-          precoRepository.buscarHistorico(produto, {
-            dataInicio: dataInicioDate,
-            dataFim: dataFimDate,
-            municipio,
-            limite,
-          }),
-          precoRepository.contarRegistros(produto),
-        ]);
-        return { produto, municipio, totalRegistros: total, retornados: itens.length, itens };
-      },
-    );
-    res.status(200).json(resposta);
-  } catch (err) {
-    log.error('Erro ao buscar histórico', {
-      erro: err instanceof Error ? err.message : String(err),
-    });
-    res.status(500).json({ erro: 'Erro ao consultar histórico no banco de dados.' });
-  }
+  const resposta = await withCache(
+    cacheRapido,
+    buildKey('historico', { produto, municipio, limite, dataInicio, dataFim }),
+    async () => {
+      const [itens, total] = await Promise.all([
+        precoRepository.buscarHistorico(produto, {
+          dataInicio: dataInicioDate,
+          dataFim: dataFimDate,
+          municipio,
+          limite,
+        }),
+        precoRepository.contarRegistros(produto),
+      ]);
+      return { produto, municipio, totalRegistros: total, retornados: itens.length, itens };
+    },
+  );
+  res.status(200).json(resposta);
 }
