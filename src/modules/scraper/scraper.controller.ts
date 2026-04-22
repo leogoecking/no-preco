@@ -1,12 +1,15 @@
 import { Request, Response } from 'express';
-import { precoRepository } from '../preco/preco.repository';
+import { precoRepository, PrecoRecente } from '../preco/preco.repository';
 import { buscarProdutos } from './scraper.service';
+import { ProdutoPreco, ResultadoBusca } from './scraper.types';
 import { buildKey, cacheRapido } from '../../shared/cache/app-cache';
 import { withCache } from '../../shared/cache/with-cache';
 import { Logger } from '../../shared/logger/logger';
 import { BuscarQuery, BuscarEanQuery, HistoricoQuery } from './scraper.schemas';
 
 const log = new Logger('ScraperController');
+
+type Fonte = 'banco_de_dados' | 'scrape_ao_vivo';
 
 export async function buscar(req: Request, res: Response): Promise<void> {
   const { produto, termo, cidade, municipio, dias, limite } = req.validatedQuery as BuscarQuery;
@@ -17,46 +20,17 @@ export async function buscar(req: Request, res: Response): Promise<void> {
     cacheRapido,
     buildKey('busca', { termo: termoBusca, cidade: cidadeFiltro, dias, limite }),
     async () => {
-      let itens = await precoRepository.buscarPorTermo(termoBusca, {
-        cidade: cidadeFiltro,
-        diasRecentes: dias,
-        limite,
-      });
-
-      let fonte: 'banco_de_dados' | 'scrape_ao_vivo' = 'banco_de_dados';
-
-      if (itens.length === 0) {
-        log.info('Banco sem resultados — acionando scrape ao vivo', {
-          termo: termoBusca,
-          cidade: cidadeFiltro,
-        });
-
-        fonte = 'scrape_ao_vivo';
-        const resultado = await buscarProdutos({ termo: termoBusca, municipio: cidadeFiltro });
-
-        if (resultado.itens.length > 0) {
-          await precoRepository.salvarLote(resultado.itens, 'api');
-          itens = await precoRepository.buscarPorTermo(termoBusca, {
+      const { itens, fonte } = await buscarComFallbackScrape({
+        termoLog: termoBusca,
+        diasNormal: dias,
+        buscarNoBanco: (diasRecentes) =>
+          precoRepository.buscarPorTermo(termoBusca, {
             cidade: cidadeFiltro,
-            diasRecentes: 1,
+            diasRecentes,
             limite,
-          });
-
-          // Fallback: usa os itens do scraper direto se o banco ainda não os indexou
-          if (itens.length === 0) {
-            itens = resultado.itens.map((i) => ({
-              produto: i.nome,
-              preco: i.preco,
-              mercado: i.mercado,
-              cnpj: i.cnpj,
-              cidade: i.cidade ?? i.municipio ?? '',
-              municipio: i.municipio,
-              unidade: i.unidade,
-              dataColeta: i.dataColeta ? new Date(i.dataColeta) : new Date(),
-            }));
-          }
-        }
-      }
+          }),
+        buscarNoScraper: () => buscarProdutos({ termo: termoBusca, municipio: cidadeFiltro }),
+      });
 
       return {
         produto: termoBusca,
@@ -85,31 +59,13 @@ export async function buscarPorEan(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  let itens = await precoRepository.buscarPorEan(ean, { cidade: cidadeFiltro, diasRecentes: 7 });
-  let fonte: 'banco_de_dados' | 'scrape_ao_vivo' = 'banco_de_dados';
-
-  if (itens.length === 0) {
-    fonte = 'scrape_ao_vivo';
-    const resultado = await buscarProdutos({ termo: ean, ean, municipio: cidadeFiltro });
-
-    if (resultado.itens.length > 0) {
-      await precoRepository.salvarLote(resultado.itens, 'api');
-      itens = await precoRepository.buscarPorEan(ean, { cidade: cidadeFiltro, diasRecentes: 1 });
-
-      if (itens.length === 0) {
-        itens = resultado.itens.map((i) => ({
-          produto: i.nome,
-          preco: i.preco,
-          mercado: i.mercado,
-          cnpj: i.cnpj,
-          cidade: i.cidade ?? i.municipio ?? '',
-          municipio: i.municipio,
-          unidade: i.unidade,
-          dataColeta: i.dataColeta ? new Date(i.dataColeta) : new Date(),
-        }));
-      }
-    }
-  }
+  const { itens, fonte } = await buscarComFallbackScrape({
+    termoLog: ean,
+    diasNormal: 7,
+    buscarNoBanco: (diasRecentes) =>
+      precoRepository.buscarPorEan(ean, { cidade: cidadeFiltro, diasRecentes }),
+    buscarNoScraper: () => buscarProdutos({ termo: ean, ean, municipio: cidadeFiltro }),
+  });
 
   const resposta = { ean, cidade: cidadeFiltro, totalItens: itens.length, fonte, itens };
   if (itens.length > 0) cacheRapido.set(chave, resposta);
@@ -139,4 +95,43 @@ export async function historico(req: Request, res: Response): Promise<void> {
     },
   );
   res.status(200).json(resposta);
+}
+
+interface FallbackParams {
+  termoLog: string;
+  diasNormal: number;
+  buscarNoBanco: (diasRecentes: number) => Promise<PrecoRecente[]>;
+  buscarNoScraper: () => Promise<ResultadoBusca>;
+}
+
+async function buscarComFallbackScrape(
+  params: FallbackParams,
+): Promise<{ itens: PrecoRecente[]; fonte: Fonte }> {
+  const itensIniciais = await params.buscarNoBanco(params.diasNormal);
+  if (itensIniciais.length > 0) return { itens: itensIniciais, fonte: 'banco_de_dados' };
+
+  log.info('Banco sem resultados — acionando scrape ao vivo', { termo: params.termoLog });
+
+  const resultado = await params.buscarNoScraper();
+  if (resultado.itens.length === 0) return { itens: [], fonte: 'scrape_ao_vivo' };
+
+  await precoRepository.salvarLote(resultado.itens, 'api');
+  const reconsulta = await params.buscarNoBanco(1);
+
+  // Fallback: usa os itens do scraper direto se o banco ainda não os indexou
+  const itens = reconsulta.length > 0 ? reconsulta : resultado.itens.map(mapScrapeItemParaRecente);
+  return { itens, fonte: 'scrape_ao_vivo' };
+}
+
+function mapScrapeItemParaRecente(i: ProdutoPreco): PrecoRecente {
+  return {
+    produto: i.nome,
+    preco: i.preco,
+    mercado: i.mercado,
+    cnpj: i.cnpj,
+    cidade: i.cidade ?? i.municipio ?? '',
+    municipio: i.municipio,
+    unidade: i.unidade,
+    dataColeta: i.dataColeta ? new Date(i.dataColeta) : new Date(),
+  };
 }
