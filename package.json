@@ -11,6 +11,8 @@
     "compose:up": "npm run build --prefix frontend && docker compose up --build",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
     "test": "jest",
     "test:coverage": "jest --coverage",
     "postinstall": "prisma generate"
