@@ -22,11 +22,22 @@ const ENDPOINT_PESQUISA = '/produtos/';
 
 async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
   const { page, csrfToken } = await getSharedPage(BASE_URL, ENDPOINT_PESQUISA);
+  const body = montarBodyBusca(params);
+  const resultado = await executarFetchNoBrowser(
+    page,
+    BASE_URL + ENDPOINT_PESQUISA,
+    csrfToken,
+    body,
+    params.termo,
+  );
+  return interpretarResposta(resultado, page, params.termo);
+}
 
+function montarBodyBusca(params: BuscaParams): string {
   const coords = resolverCoordenadas(params.municipio);
   const termoBusca = params.ean ?? params.termo;
 
-  const body = new URLSearchParams({
+  return new URLSearchParams({
     produto: termoBusca,
     descricao: termoBusca,
     termo: termoBusca,
@@ -37,12 +48,21 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
     pagina: String(params.pagina ?? 1),
     ordenar: 'preco.asc',
   }).toString();
+}
 
-  let resultado: { status: number; body: string };
+type RespostaFetch = { status: number; body: string };
+
+async function executarFetchNoBrowser(
+  page: Awaited<ReturnType<typeof getSharedPage>>['page'],
+  url: string,
+  csrfToken: string,
+  body: string,
+  termo: string,
+): Promise<RespostaFetch> {
   try {
-    resultado = await page.evaluate(
-      async (url, csrf, payload) => {
-        const resp = await fetch(url, {
+    return await page.evaluate(
+      async (u, csrf, payload) => {
+        const resp = await fetch(u, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -55,13 +75,13 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
         const texto = await resp.text();
         return { status: resp.status, body: texto };
       },
-      BASE_URL + ENDPOINT_PESQUISA,
+      url,
       csrfToken,
       body,
     );
   } catch (err) {
     const mensagem = err instanceof Error ? err.message : String(err);
-    log.warn('page.evaluate(fetch) lançou exceção', { termo: params.termo, erro: mensagem });
+    log.warn('page.evaluate(fetch) lançou exceção', { termo, erro: mensagem });
     invalidateSharedPage();
 
     // "Execution context was destroyed" = página navegou/redirecionou durante o
@@ -75,10 +95,16 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
 
     throw err;
   }
+}
 
+async function interpretarResposta(
+  resultado: RespostaFetch,
+  page: Awaited<ReturnType<typeof getSharedPage>>['page'],
+  termo: string,
+): Promise<ProdutoPreco[]> {
   log.info('POST /produtos/ disparado', {
     status: resultado.status,
-    termo: params.termo,
+    termo,
     preview: resultado.body.slice(0, 150),
   });
 
@@ -117,7 +143,7 @@ async function buscarViaBrowser(params: BuscaParams): Promise<ProdutoPreco[]> {
 
   // Fallback: parse do HTML já renderizado pelo browser
   const html = await page.content();
-  return parseHtmlRenderizado(html, params.termo);
+  return parseHtmlRenderizado(html, termo);
 }
 
 // ─────────────────────────────────────────────
