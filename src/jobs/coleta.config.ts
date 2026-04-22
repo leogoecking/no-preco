@@ -36,14 +36,14 @@ export const coletaConfig: ColetaConfig = {
     // Cesta básica
     { termo: 'arroz 5kg', label: 'Arroz 5kg', grupo: 0 },
     { termo: 'feijão carioca 1kg', label: 'Feijão Carioca 1kg', grupo: 1 },
-    { termo: 'feijão preto 1kg', label: 'Feijão Preto 1kg', grupo: 0 },
+    { termo: 'cafe', label: 'cafe', grupo: 0 },
     { termo: 'açúcar cristal 1kg', label: 'Açúcar Cristal 1kg', grupo: 1 },
     { termo: 'farinha de trigo 1kg', label: 'Farinha de Trigo 1kg', grupo: 0 },
     { termo: 'óleo de soja 900ml', label: 'Óleo de Soja 900ml', grupo: 1 },
     { termo: 'macarrão espaguete 500g', label: 'Macarrão Espaguete 500g', grupo: 0 },
     { termo: 'sal refinado 1kg', label: 'Sal Refinado 1kg', grupo: 1 },
     // Proteínas
-    { termo: 'frango inteiro kg', label: 'Frango Inteiro (kg)', grupo: 0 },
+    { termo: 'moela', label: 'moela', grupo: 0 },
     { termo: 'carne moída kg', label: 'Carne Moída (kg)', grupo: 1 },
     { termo: 'ovos dúzia', label: 'Ovos (dúzia)', grupo: 0 },
     // Laticínios
@@ -52,5 +52,10 @@ export const coletaConfig: ColetaConfig = {
     // Higiene
     { termo: 'sabão em pó 1kg', label: 'Sabão em Pó 1kg', grupo: 1 },
     { termo: 'detergente 500ml', label: 'Detergente 500ml', grupo: 0 },
+    { termo: 'desodorante', label: 'Desodorante', grupo: 1 },
+
+    // Verduras e Legumes
+    { termo: 'tomate kg', label: 'Tomate (kg)', grupo: 1 },
+    { termo: 'cenoura kg', label: 'Cenoura (kg)', grupo: 0 },
   ],
 };
