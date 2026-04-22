@@ -1,49 +1,44 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction, RequestHandler } from 'express';
 import { ZodTypeAny, ZodError } from 'zod';
+
+type Source = 'query' | 'body' | 'params';
+
+const rotulos: Record<Source, string> = {
+  query: 'Parâmetros inválidos',
+  body: 'Body inválido',
+  params: 'Parâmetros de rota inválidos',
+};
+
+const camposValidados: Record<Source, 'validatedQuery' | 'validatedBody' | 'validatedParams'> = {
+  query: 'validatedQuery',
+  body: 'validatedBody',
+  params: 'validatedParams',
+};
 
 function formatErrors(err: ZodError): Record<string, string[]> {
   return err.flatten().fieldErrors as Record<string, string[]>;
 }
 
-export function validateQuery(schema: ZodTypeAny) {
+function validate(source: Source, schema: ZodTypeAny): RequestHandler {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const result = schema.safeParse(req.query);
+    const result = schema.safeParse(req[source]);
     if (!result.success) {
-      res.status(400).json({ erro: 'Parâmetros inválidos', detalhes: formatErrors(result.error) });
+      res.status(400).json({ erro: rotulos[source], detalhes: formatErrors(result.error) });
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    req.query = result.data as any;
-    req.validatedQuery = result.data;
+    // req.query e req.params têm tipos restritos (ParsedQs / ParamsDictionary);
+    // só reassinalamos quando Express aceita sem cast (body) ou via cast controlado.
+    if (source === 'body') {
+      req.body = result.data;
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      req[source] = result.data as any;
+    }
+    req[camposValidados[source]] = result.data;
     next();
   };
 }
 
-export function validateBody(schema: ZodTypeAny) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const result = schema.safeParse(req.body);
-    if (!result.success) {
-      res.status(400).json({ erro: 'Body inválido', detalhes: formatErrors(result.error) });
-      return;
-    }
-    req.body = result.data;
-    req.validatedBody = result.data;
-    next();
-  };
-}
-
-export function validateParams(schema: ZodTypeAny) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const result = schema.safeParse(req.params);
-    if (!result.success) {
-      res
-        .status(400)
-        .json({ erro: 'Parâmetros de rota inválidos', detalhes: formatErrors(result.error) });
-      return;
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    req.params = result.data as any;
-    req.validatedParams = result.data;
-    next();
-  };
-}
+export const validateQuery = (schema: ZodTypeAny): RequestHandler => validate('query', schema);
+export const validateBody = (schema: ZodTypeAny): RequestHandler => validate('body', schema);
+export const validateParams = (schema: ZodTypeAny): RequestHandler => validate('params', schema);
