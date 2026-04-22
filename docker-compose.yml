@@ -4,16 +4,16 @@ services:
   # API Node.js
   # ────────────────────────────────────────────────────────────
   api:
-    image: ghcr.io/leogoecking/no-preco:latest
     build:
       context: .
       dockerfile: Dockerfile
       target: runner
     container_name: no-preco-api
-    restart: unless-stopped
+    restart: "no"
 
+    env_file: .env
     environment:
-      NODE_ENV:         production
+      NODE_ENV:         development
       PORT:             ${PORT:-3000}
       DATABASE_URL:     ${DATABASE_URL:?Defina DATABASE_URL no .env}
       JWT_SECRET:       ${JWT_SECRET:?Defina JWT_SECRET no .env}
@@ -23,9 +23,10 @@ services:
       COLETA_MUNICIPIO: ${COLETA_MUNICIPIO:-Salvador}
       COLETA_CRON:      ${COLETA_CRON:-0 * * * *}
 
-    # Porta não exposta externamente — acesso somente pelo nginx
-    expose:
-      - "3000"
+    ports:
+      - "3001:3000"
+
+    shm_size: '256m'
 
     networks:
       - app_network
@@ -49,10 +50,10 @@ services:
   nginx:
     image: nginx:1.27-alpine
     container_name: no-preco-nginx
-    restart: unless-stopped
+    restart: "no"
 
     ports:
-      - "80:80"
+      - "8080:80"
 
     volumes:
       - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
