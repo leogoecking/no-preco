@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { alertas, estatisticas, volatilidade } from './inteligencia.controller';
 import { validateQuery } from '../../shared/validation/validate';
+import { asyncHandler } from '../../shared/middleware/async-handler';
 import {
   EstatisticasQuerySchema,
   VolatilidadeQuerySchema,
@@ -12,11 +13,15 @@ export const inteligenciaRouter = Router();
 inteligenciaRouter.get(
   '/inteligencia/estatisticas',
   validateQuery(EstatisticasQuerySchema),
-  estatisticas,
+  asyncHandler(estatisticas),
 );
 inteligenciaRouter.get(
   '/inteligencia/volatilidade',
   validateQuery(VolatilidadeQuerySchema),
-  volatilidade,
+  asyncHandler(volatilidade),
 );
-inteligenciaRouter.get('/inteligencia/alertas', validateQuery(AlertasQuerySchema), alertas);
+inteligenciaRouter.get(
+  '/inteligencia/alertas',
+  validateQuery(AlertasQuerySchema),
+  asyncHandler(alertas),
+);

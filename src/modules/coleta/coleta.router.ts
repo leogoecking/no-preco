@@ -3,6 +3,7 @@ import { disparar, status } from './coleta.controller';
 import { limiterColeta } from '../../shared/middleware/rate-limiter';
 import { autenticar } from '../../shared/middleware/auth.middleware';
 import { validateBody } from '../../shared/validation/validate';
+import { asyncHandler } from '../../shared/middleware/async-handler';
 import { DispararBodySchema } from './coleta.schemas';
 
 export const coletaRouter = Router();
@@ -12,7 +13,7 @@ coletaRouter.post(
   autenticar,
   limiterColeta,
   validateBody(DispararBodySchema),
-  disparar,
+  asyncHandler(disparar),
 );
 
 coletaRouter.get('/coleta/status', status);
