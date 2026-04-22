@@ -55,60 +55,95 @@ export class PrecoRepository implements IPrecoRepository {
   async salvarLote(itens: ProdutoPreco[], fonte: 'api' | 'html' | 'browser'): Promise<number> {
     if (itens.length === 0) return 0;
 
-    let inseridos = 0;
-    let atualizados = 0;
-
     try {
-      for (const item of itens) {
-        const produto = item.nome.toLowerCase().trim();
-        const cnpj = item.cnpj?.trim() ?? '';
-        const precoNovo = new Prisma.Decimal(item.preco);
+      const agora = new Date();
+      const preparados = itens.map((item) => ({
+        item,
+        produto: item.nome.toLowerCase().trim(),
+        cnpj: item.cnpj?.trim() ?? '',
+        precoNovo: new Prisma.Decimal(item.preco),
+      }));
 
-        // cnpj vazio quebra a chave natural (produto, cnpj) — insere sempre
-        // para não colapsar estabelecimentos distintos numa única linha.
-        const ultimo = cnpj
-          ? await prisma.preco.findFirst({
-              where: { produto, cnpj },
-              orderBy: { dataColeta: 'desc' },
-              select: { id: true, preco: true },
-            })
-          : null;
+      // cnpj vazio quebra a chave natural (produto, cnpj) — não consulta
+      // para não colapsar estabelecimentos distintos numa única linha.
+      const comCnpj = preparados.filter((p) => p.cnpj !== '');
+      const ultimoPorChave: Map<string, { id: number; preco: Prisma.Decimal }> =
+        comCnpj.length > 0 ? await this.buscarUltimosPorChave(comCnpj) : new Map();
 
-        if (ultimo && ultimo.preco.equals(precoNovo)) {
-          await prisma.preco.update({
-            where: { id: ultimo.id },
-            data: { dataColeta: new Date() },
-          });
-          atualizados++;
+      const idsParaAtualizar: number[] = [];
+      const paraCriar: Prisma.PrecoCreateManyInput[] = [];
+
+      for (const p of preparados) {
+        const ultimo = p.cnpj ? ultimoPorChave.get(chaveProdutoCnpj(p.produto, p.cnpj)) : undefined;
+
+        if (ultimo && ultimo.preco.equals(p.precoNovo)) {
+          idsParaAtualizar.push(ultimo.id);
         } else {
-          await prisma.preco.create({
-            data: {
-              produto,
-              preco: precoNovo,
-              mercado: item.mercado.trim(),
-              cnpj,
-              cidade: normalizarCidade(item.cidade ?? item.municipio ?? 'desconhecida'),
-              municipio: item.municipio ?? null,
-              unidade: item.unidade ?? null,
-              ean: item.ean ?? null,
-              dataColeta: item.dataColeta ? new Date(item.dataColeta) : new Date(),
-              fonte: fonte as Fonte,
-            },
+          paraCriar.push({
+            produto: p.produto,
+            preco: p.precoNovo,
+            mercado: p.item.mercado.trim(),
+            cnpj: p.cnpj,
+            cidade: normalizarCidade(p.item.cidade ?? p.item.municipio ?? 'desconhecida'),
+            municipio: p.item.municipio ?? null,
+            unidade: p.item.unidade ?? null,
+            ean: p.item.ean ?? null,
+            dataColeta: p.item.dataColeta ? new Date(p.item.dataColeta) : agora,
+            fonte: fonte as Fonte,
           });
-          inseridos++;
         }
       }
 
-      const processados = inseridos + atualizados;
+      const operacoes: Prisma.PrismaPromise<unknown>[] = [];
+      if (idsParaAtualizar.length > 0) {
+        operacoes.push(
+          prisma.preco.updateMany({
+            where: { id: { in: idsParaAtualizar } },
+            data: { dataColeta: agora },
+          }),
+        );
+      }
+      if (paraCriar.length > 0) {
+        operacoes.push(prisma.preco.createMany({ data: paraCriar }));
+      }
+      if (operacoes.length > 0) {
+        await prisma.$transaction(operacoes);
+      }
+
       log.info('Preços processados', {
-        inseridos,
-        atualizados,
+        inseridos: paraCriar.length,
+        atualizados: idsParaAtualizar.length,
         total: itens.length,
       });
-      return processados;
+
+      return paraCriar.length + idsParaAtualizar.length;
     } catch (err) {
       throw new RepositoryError('Falha ao salvar lote de preços', err);
     }
+  }
+
+  private async buscarUltimosPorChave(
+    itens: { produto: string; cnpj: string }[],
+  ): Promise<Map<string, { id: number; preco: Prisma.Decimal }>> {
+    const pares = itens.map((i) => Prisma.sql`(${i.produto}, ${i.cnpj})`);
+
+    const rows = await prisma.$queryRaw<
+      { id: number; produto: string; cnpj: string; preco: Prisma.Decimal }[]
+    >(
+      Prisma.sql`
+        SELECT DISTINCT ON (produto, cnpj)
+          id, produto, cnpj, preco
+        FROM precos
+        WHERE (produto, cnpj) IN (${Prisma.join(pares)})
+        ORDER BY produto, cnpj, "dataColeta" DESC
+      `,
+    );
+
+    const mapa = new Map<string, { id: number; preco: Prisma.Decimal }>();
+    for (const row of rows) {
+      mapa.set(chaveProdutoCnpj(row.produto, row.cnpj), { id: row.id, preco: row.preco });
+    }
+    return mapa;
   }
 
   async buscarPorTermo(termo: string, opcoes: BuscaTermoOptions = {}): Promise<PrecoRecente[]> {
@@ -242,6 +277,10 @@ export class RepositoryError extends Error {
 }
 
 const normalizarCidade = normalizarSlug;
+
+function chaveProdutoCnpj(produto: string, cnpj: string): string {
+  return `${produto}::${cnpj}`;
+}
 
 type PrismaPreco = {
   id: number;
