@@ -147,43 +147,18 @@ export class PrecoRepository implements IPrecoRepository {
   }
 
   async buscarPorTermo(termo: string, opcoes: BuscaTermoOptions = {}): Promise<PrecoRecente[]> {
-    const { cidade, municipio, diasRecentes = 7, limite = 100 } = opcoes;
-    const cidadeFiltro = cidade ?? municipio;
-    const dataLimite = diasAtras(diasRecentes);
     const termoLike = `%${termo.toLowerCase().trim()}%`;
-
-    const whereExtra = cidadeFiltro
-      ? Prisma.sql`AND cidade = ${normalizarCidade(cidadeFiltro)}`
-      : Prisma.empty;
-
-    return prisma.$queryRaw<PrecoRecente[]>(
-      Prisma.sql`
-        WITH ranked AS (
-          SELECT *,
-            ROW_NUMBER() OVER (PARTITION BY produto, mercado, cnpj ORDER BY "dataColeta" DESC) AS rn
-          FROM precos
-          WHERE produto ILIKE ${termoLike}
-            AND "dataColeta" >= ${dataLimite}
-            ${whereExtra}
-        )
-        SELECT
-          produto,
-          preco::float8 AS preco,
-          mercado,
-          cnpj,
-          cidade,
-          municipio,
-          unidade,
-          "dataColeta"
-        FROM ranked
-        WHERE rn = 1
-        ORDER BY preco ASC
-        LIMIT ${limite}
-      `,
-    );
+    return this.buscarRecentesRanked(Prisma.sql`produto ILIKE ${termoLike}`, opcoes);
   }
 
   async buscarPorEan(ean: string, opcoes: BuscaTermoOptions = {}): Promise<PrecoRecente[]> {
+    return this.buscarRecentesRanked(Prisma.sql`ean = ${ean.trim()}`, opcoes);
+  }
+
+  private buscarRecentesRanked(
+    filtroPrincipal: Prisma.Sql,
+    opcoes: BuscaTermoOptions,
+  ): Promise<PrecoRecente[]> {
     const { cidade, municipio, diasRecentes = 7, limite = 100 } = opcoes;
     const cidadeFiltro = cidade ?? municipio;
     const dataLimite = diasAtras(diasRecentes);
@@ -198,7 +173,7 @@ export class PrecoRepository implements IPrecoRepository {
           SELECT *,
             ROW_NUMBER() OVER (PARTITION BY produto, mercado, cnpj ORDER BY "dataColeta" DESC) AS rn
           FROM precos
-          WHERE ean = ${ean.trim()}
+          WHERE ${filtroPrincipal}
             AND "dataColeta" >= ${dataLimite}
             ${whereExtra}
         )
