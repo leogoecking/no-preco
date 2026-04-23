@@ -14,21 +14,39 @@ enum Fonte {
 }
 
 model Preco {
-  id         Int      @id @default(autoincrement())
-  produto    String
-  preco      Decimal  @db.Decimal(10, 2)
-  mercado    String
-  cnpj       String   @default("")
-  cidade     String
-  municipio  String?
-  ean        String?
-  unidade    String?
-  fonte      Fonte    @default(api)
-  dataColeta DateTime
-  criadoEm   DateTime @default(now())
+  id            Int      @id @default(autoincrement())
+  produto       String
+  preco         Decimal  @db.Decimal(10, 2)
+  precoAnterior Decimal? @db.Decimal(10, 2)
+  mercado       String
+  cnpj          String   @default("")
+  cidade        String
+  municipio     String?
+  ean           String?
+  unidade       String?
+  fonte         Fonte    @default(api)
+  dataColeta    DateTime
+  atualizadoEm  DateTime @default(now()) @updatedAt
+  criadoEm      DateTime @default(now())
+
+  historico HistoricoPreco[]
 
   @@index([produto, dataColeta(sort: Desc)])
   @@index([cidade, produto, dataColeta(sort: Desc)])
   @@index([ean])
   @@map("precos")
+}
+
+model HistoricoPreco {
+  id           Int      @id @default(autoincrement())
+  precoId      Int
+  preco        Decimal  @db.Decimal(10, 2)
+  dataColeta   DateTime
+  fonte        Fonte    @default(api)
+  registradoEm DateTime @default(now())
+
+  precoRef Preco @relation(fields: [precoId], references: [id], onDelete: Cascade)
+
+  @@index([precoId, dataColeta(sort: Desc)])
+  @@map("precos_historico")
 }
