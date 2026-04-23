@@ -38,8 +38,8 @@ export async function analisarCarrinho(input: AnaliseInput): Promise<ResultadoAn
     municipio: input.municipio,
     totalItensNaLista: itensNormalizados.length,
     naoEncontradosEmNenhumMercado: naoEncontrados,
-    opcao1_mercadoUnico: opcao1,
-    opcao2_combinacaoOtima: opcao2,
+    mercadoUnico: opcao1,
+    combinacao: opcao2,
     decisao,
   };
 }
@@ -122,12 +122,13 @@ export function calcularMercadoUnico(
   return {
     mercado: melhor.mercado,
     cnpj: melhor.cnpj,
-    totalCarrinho: arredondar(melhor.total),
+    total: arredondar(melhor.total),
     cobertura: arredondar(melhor.cobertura, 4),
-    itensCobertos: melhor.itensCobertos.map(({ produto, quantidade, oferta }) => ({
+    itensEncontrados: melhor.itensCobertos.length,
+    itens: melhor.itensCobertos.map(({ produto, quantidade, oferta }) => ({
       produto,
       quantidade,
-      precoUnitario: arredondar(oferta.preco),
+      preco: arredondar(oferta.preco),
       subtotal: arredondar(oferta.preco * quantidade),
       unidade: oferta.unidade,
     })),
@@ -165,7 +166,7 @@ export function calcularCombinacaoOtima(
     itensResultado.push({
       produto: item.produto,
       quantidade: item.quantidade,
-      precoUnitario: arredondar(melhorOferta.preco),
+      preco: arredondar(melhorOferta.preco),
       subtotal: arredondar(melhorOferta.preco * item.quantidade),
       unidade: melhorOferta.unidade,
       mercado: melhorOferta.mercado,
@@ -173,15 +174,15 @@ export function calcularCombinacaoOtima(
     });
   }
 
-  const totalCarrinho = arredondar(itensResultado.reduce((acc, i) => acc + i.subtotal, 0));
+  const total = arredondar(itensResultado.reduce((acc, i) => acc + i.subtotal, 0));
 
   const resumoPorMercado = consolidarPorMercado(itensResultado);
 
   return {
-    totalCarrinho,
+    total,
     mercadosNecessarios: resumoPorMercado.length,
+    mercados: resumoPorMercado.map((r) => r.mercado),
     itens: itensResultado,
-    resumoPorMercado,
     itensFaltantes,
   };
 }
@@ -194,9 +195,9 @@ export function gerarDecisao(opcao1: OpcaoMercadoUnico | null, opcao2: OpcaoComb
   // Nenhum dado encontrado
   if (!opcao1 && opcao2.itens.length === 0) {
     return {
-      recomendacao: 'SEM_DADOS',
+      recomendacao: 'sem_dados',
       motivo: 'Nenhum preço encontrado no banco para os produtos informados.',
-      economiaAbsoluta: 0,
+      economia: 0,
       economiaPercent: 0,
     };
   }
@@ -204,37 +205,35 @@ export function gerarDecisao(opcao1: OpcaoMercadoUnico | null, opcao2: OpcaoComb
   // Sem dados para opcao1 — combinação é a única alternativa
   if (!opcao1) {
     return {
-      recomendacao: 'COMBINACAO',
+      recomendacao: 'combinacao',
       motivo: 'Nenhum mercado único cobre todos os itens da lista.',
-      economiaAbsoluta: 0,
+      economia: 0,
       economiaPercent: 0,
     };
   }
 
-  const economiaAbsoluta = arredondar(opcao1.totalCarrinho - opcao2.totalCarrinho);
-  const economiaPercent = arredondar((economiaAbsoluta / opcao1.totalCarrinho) * 100, 2);
+  const economia = arredondar(opcao1.total - opcao2.total);
+  const economiaPercent = arredondar((economia / opcao1.total) * 100, 2);
   const mercadosExtras = opcao2.mercadosNecessarios - 1;
 
   let recomendacao: Recomendacao;
   let motivo: string;
 
   if (opcao1.cobertura < 1) {
-    // Mercado único não tem todos os produtos
-    recomendacao = 'COMBINACAO';
+    recomendacao = 'combinacao';
     motivo = `O melhor mercado único (${opcao1.mercado}) cobre apenas ${Math.round(opcao1.cobertura * 100)}% dos itens. A combinação é necessária para uma compra completa.`;
   } else if (opcao2.mercadosNecessarios === 1) {
-    // Combinação ótima também aponta para 1 único mercado
-    recomendacao = 'MERCADO_UNICO';
-    motivo = `A combinação ótima já concentra tudo em ${opcao2.resumoPorMercado[0]?.mercado ?? opcao1.mercado}. Não há vantagem em dividir a compra.`;
+    recomendacao = 'mercado_unico';
+    motivo = `A combinação ótima já concentra tudo em ${opcao2.mercados[0] ?? opcao1.mercado}. Não há vantagem em dividir a compra.`;
   } else if (economiaPercent >= LIMIAR_ECONOMIA_PERCENT) {
-    recomendacao = 'COMBINACAO';
-    motivo = `Dividir a compra em ${opcao2.mercadosNecessarios} mercados gera economia de R$ ${economiaAbsoluta.toFixed(2)} (${economiaPercent.toFixed(1)}%), visitando ${mercadosExtras} mercado(s) adicional(is).`;
+    recomendacao = 'combinacao';
+    motivo = `Dividir a compra em ${opcao2.mercadosNecessarios} mercados gera economia de R$ ${economia.toFixed(2)} (${economiaPercent.toFixed(1)}%), visitando ${mercadosExtras} mercado(s) adicional(is).`;
   } else {
-    recomendacao = 'MERCADO_UNICO';
-    motivo = `A economia da combinação (R$ ${economiaAbsoluta.toFixed(2)} / ${economiaPercent.toFixed(1)}%) não justifica visitar ${mercadosExtras} mercado(s) extra(s). Concentrar em ${opcao1.mercado} é mais prático.`;
+    recomendacao = 'mercado_unico';
+    motivo = `A economia da combinação (R$ ${economia.toFixed(2)} / ${economiaPercent.toFixed(1)}%) não justifica visitar ${mercadosExtras} mercado(s) extra(s). Concentrar em ${opcao1.mercado} é mais prático.`;
   }
 
-  return { recomendacao, motivo, economiaAbsoluta, economiaPercent };
+  return { recomendacao, motivo, economia, economiaPercent };
 }
 
 // ─────────────────────────────────────────────

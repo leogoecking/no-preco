@@ -37,7 +37,7 @@ export type MatrizPrecos = Map<string, Map<string, Oferta>>;
 export interface ItemResultado {
   produto: string;
   quantidade: number;
-  precoUnitario: number;
+  preco: number;
   subtotal: number;
   unidade?: string;
 }
@@ -45,9 +45,10 @@ export interface ItemResultado {
 export interface OpcaoMercadoUnico {
   mercado: string;
   cnpj: string;
-  totalCarrinho: number;
+  total: number;
   cobertura: number;
-  itensCobertos: ItemResultado[];
+  itensEncontrados: number;
+  itens: ItemResultado[];
   itensFaltantes: string[];
 }
 
@@ -56,6 +57,7 @@ export interface ItemCombinacao extends ItemResultado {
   cnpj: string;
 }
 
+/** Usado internamente para consolidar por mercado antes de extrair string[] */
 export interface ResumoPorMercado {
   mercado: string;
   cnpj: string;
@@ -64,19 +66,19 @@ export interface ResumoPorMercado {
 }
 
 export interface OpcaoCombinacao {
-  totalCarrinho: number;
+  total: number;
   mercadosNecessarios: number;
+  mercados: string[];
   itens: ItemCombinacao[];
-  resumoPorMercado: ResumoPorMercado[];
   itensFaltantes: string[];
 }
 
-export type Recomendacao = 'MERCADO_UNICO' | 'COMBINACAO' | 'SEM_DADOS';
+export type Recomendacao = 'mercado_unico' | 'combinacao' | 'sem_dados';
 
 export interface Decisao {
   recomendacao: Recomendacao;
   motivo: string;
-  economiaAbsoluta: number;
+  economia: number;
   economiaPercent: number;
 }
 
@@ -85,7 +87,7 @@ export interface ResultadoAnalise {
   municipio?: string;
   totalItensNaLista: number;
   naoEncontradosEmNenhumMercado: string[];
-  opcao1_mercadoUnico: OpcaoMercadoUnico | null;
-  opcao2_combinacaoOtima: OpcaoCombinacao;
+  mercadoUnico: OpcaoMercadoUnico | null;
+  combinacao: OpcaoCombinacao;
   decisao: Decisao;
 }
