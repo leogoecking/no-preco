@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MapPin } from 'lucide-react'
+import { AlertasPreco } from '@/components/AlertasPreco'
 import { BuscaProduto } from '@/components/BuscaProduto'
 import { CarrinhoSheet } from '@/components/CarrinhoSheet'
 
@@ -23,6 +24,7 @@ export default function App() {
         </header>
 
         <main className="mx-auto max-w-2xl px-4 py-6">
+          <AlertasPreco />
           <BuscaProduto />
         </main>
       </div>
