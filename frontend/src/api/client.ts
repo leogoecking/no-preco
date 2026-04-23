@@ -32,6 +32,7 @@ import type {
   ResultadoBuscaEan,
   ResultadoAnalise,
   ResultadoAlertas,
+  ResultadoHistorico,
   ItemCarrinho,
 } from '@/types/api'
 
@@ -49,4 +50,7 @@ export const api = {
 
   alertas: () =>
     get<ResultadoAlertas>('/inteligencia/alertas', { municipio: MUNICIPIO, variacaoLimiar: -5 }),
+
+  historico: (produto: string) =>
+    get<ResultadoHistorico>('/produtos/historico', { produto, municipio: MUNICIPIO, limite: 60 }),
 }

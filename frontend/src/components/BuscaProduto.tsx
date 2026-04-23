@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { formatBRL } from '@/lib/utils'
+import { HistoricoSheet } from '@/components/HistoricoSheet'
 import type { ItemPreco } from '@/types/api'
 
 export function BuscaProduto() {
@@ -114,10 +115,11 @@ export function BuscaProduto() {
                       <p className="font-medium text-gray-900 truncate">{item.produto}</p>
                       <p className="text-sm text-gray-500 truncate">{item.mercado}</p>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0">
                       <span className="text-lg font-bold text-blue-600">
                         {formatBRL(item.preco)}
                       </span>
+                      <HistoricoSheet produto={item.produto} />
                       <Button
                         size="icon"
                         variant={noCarrinho(item.produto) ? 'outline' : 'default'}

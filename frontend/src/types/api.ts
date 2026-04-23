@@ -88,3 +88,22 @@ export interface ResultadoAlertas {
   totalAlertas: number
   alertas: AlertaPreco[]
 }
+
+export interface ItemHistorico {
+  produto: string
+  preco: number
+  mercado: string
+  cnpj?: string
+  cidade?: string
+  municipio?: string
+  unidade?: string
+  dataColeta: string
+}
+
+export interface ResultadoHistorico {
+  produto: string
+  municipio?: string
+  totalRegistros: number
+  retornados: number
+  itens: ItemHistorico[]
+}
