@@ -14,10 +14,12 @@ async function get<T>(path: string, params?: Record<string, string | number>): P
   return res.json() as Promise<T>
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function post<T>(path: string, body: unknown, token?: string): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
   const res = await fetch(BASE + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   })
   if (!res.ok) {
@@ -33,6 +35,7 @@ import type {
   ResultadoAnalise,
   ResultadoAlertas,
   ResultadoHistorico,
+  StatusColeta,
   ItemCarrinho,
 } from '@/types/api'
 
@@ -53,4 +56,17 @@ export const api = {
 
   historico: (produto: string) =>
     get<ResultadoHistorico>('/produtos/historico', { produto, municipio: MUNICIPIO, limite: 60 }),
+
+  login: (usuario: string, senha: string) =>
+    post<{ token: string }>('/auth/login', { usuario, senha }),
+
+  coletaStatus: () =>
+    get<StatusColeta>('/coleta/status'),
+
+  coletaDisparar: (token: string, produto?: string, municipio?: string) =>
+    post<{ mensagem: string; status: string }>(
+      '/coleta/disparar',
+      { produto, municipio },
+      token,
+    ),
 }

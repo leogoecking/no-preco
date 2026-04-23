@@ -107,3 +107,21 @@ export interface ResultadoHistorico {
   retornados: number
   itens: ItemHistorico[]
 }
+
+export interface RelatorioColeta {
+  iniciadoEm: string
+  finalizadoEm: string | null
+  duracaoMs: number | null
+  totalTarefas: number
+  sucessos: number
+  semResultados: number
+  falhas: number
+  itensSalvos: number
+  abortado: boolean
+}
+
+export interface StatusColeta {
+  emExecucao: boolean
+  municipioPadrao: string
+  ultimoRelatorio: RelatorioColeta | null
+}

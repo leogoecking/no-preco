@@ -3,6 +3,7 @@ import { MapPin } from 'lucide-react'
 import { AlertasPreco } from '@/components/AlertasPreco'
 import { BuscaProduto } from '@/components/BuscaProduto'
 import { CarrinhoSheet } from '@/components/CarrinhoSheet'
+import { AdminPanel } from '@/components/AdminPanel'
 
 const queryClient = new QueryClient()
 
@@ -19,7 +20,10 @@ export default function App() {
                 Teixeira de Freitas
               </div>
             </div>
-            <CarrinhoSheet />
+            <div className="flex items-center gap-1">
+              <AdminPanel />
+              <CarrinhoSheet />
+            </div>
           </div>
         </header>
 
