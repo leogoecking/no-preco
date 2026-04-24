@@ -245,9 +245,7 @@ describe('gerarDecisao', () => {
     const resultado = gerarDecisao(
       null,
       opcao2({
-        itens: [
-          { produto: 'x', quantidade: 1, preco: 1, subtotal: 1, mercado: 'M', cnpj: '0' },
-        ],
+        itens: [{ produto: 'x', quantidade: 1, preco: 1, subtotal: 1, mercado: 'M', cnpj: '0' }],
       }),
     );
     expect(resultado.recomendacao).toBe('combinacao');

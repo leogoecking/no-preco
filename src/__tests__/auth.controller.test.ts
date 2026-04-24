@@ -6,11 +6,11 @@ function makeReq(body: object): Request {
   return { body } as Request;
 }
 
-function makeRes() {
-  const res = {} as Response;
-  (res as any).status = jest.fn().mockReturnValue(res);
-  (res as any).json = jest.fn().mockReturnValue(res);
-  return res as Response & { status: jest.Mock; json: jest.Mock };
+function makeRes(): Response & { status: jest.Mock; json: jest.Mock } {
+  const res = {} as Response & { status: jest.Mock; json: jest.Mock };
+  res.status = jest.fn().mockReturnValue(res);
+  res.json = jest.fn().mockReturnValue(res);
+  return res;
 }
 
 describe('auth.controller — login', () => {
