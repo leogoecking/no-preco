@@ -22,7 +22,6 @@ const comMercadoUnico: TResultado = {
     total: 97,
     cobertura: 1,
     itensEncontrados: 1,
-    cnpj: '00',
     itens: [{ produto: 'arroz', preco: 7, quantidade: 1, subtotal: 7 }],
     itensFaltantes: [],
   },
