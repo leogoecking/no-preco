@@ -3,16 +3,20 @@ jest.mock('../modules/analise/analise.repository', () => ({
 }));
 
 import {
+  analisarCarrinho,
   calcularCombinacaoOtima,
   calcularMercadoUnico,
   gerarDecisao,
 } from '../modules/analise/analise.service';
+import { buscarMatrizPrecos } from '../modules/analise/analise.repository';
 import {
   MatrizPrecos,
   Oferta,
   OpcaoCombinacao,
   OpcaoMercadoUnico,
 } from '../modules/analise/analise.types';
+
+const mockBuscar = buscarMatrizPrecos as jest.MockedFunction<typeof buscarMatrizPrecos>;
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -38,6 +42,80 @@ function buildMatriz(dados: Record<string, Record<string, number>>): MatrizPreco
 function itens(...nomes: string[]): { produto: string; quantidade: number }[] {
   return nomes.map((produto) => ({ produto, quantidade: 1 }));
 }
+
+// ─────────────────────────────────────────────
+// analisarCarrinho
+// ─────────────────────────────────────────────
+
+describe('analisarCarrinho', () => {
+  beforeEach(() => mockBuscar.mockReset());
+
+  it('normaliza itens para lowercase antes de consultar o repositório', async () => {
+    mockBuscar.mockResolvedValue(new Map());
+    await analisarCarrinho({ itens: [{ produto: 'ARROZ', quantidade: 1 }] });
+    expect(mockBuscar).toHaveBeenCalledWith(['arroz'], undefined);
+  });
+
+  it('popula naoEncontradosEmNenhumMercado com itens ausentes na matriz', async () => {
+    mockBuscar.mockResolvedValue(buildMatriz({ arroz: { Mercado_A: 5 } }));
+    const resultado = await analisarCarrinho({
+      itens: [
+        { produto: 'arroz', quantidade: 1 },
+        { produto: 'feijao', quantidade: 1 },
+      ],
+    });
+    expect(resultado.naoEncontradosEmNenhumMercado).toEqual(['feijao']);
+  });
+
+  it('repassa municipio para o repositório e para o resultado', async () => {
+    mockBuscar.mockResolvedValue(new Map());
+    const resultado = await analisarCarrinho({
+      itens: [{ produto: 'arroz', quantidade: 1 }],
+      municipio: 'Teixeira de Freitas',
+    });
+    expect(mockBuscar).toHaveBeenCalledWith(['arroz'], 'Teixeira de Freitas');
+    expect(resultado.municipio).toBe('Teixeira de Freitas');
+  });
+
+  it('retorna totalItensNaLista com o número de itens normalizados', async () => {
+    mockBuscar.mockResolvedValue(new Map());
+    const resultado = await analisarCarrinho({
+      itens: [
+        { produto: 'arroz', quantidade: 2 },
+        { produto: 'feijao', quantidade: 1 },
+      ],
+    });
+    expect(resultado.totalItensNaLista).toBe(2);
+  });
+
+  it('retorna geradoEm como string ISO válida', async () => {
+    mockBuscar.mockResolvedValue(new Map());
+    const resultado = await analisarCarrinho({ itens: [{ produto: 'arroz', quantidade: 1 }] });
+    expect(() => new Date(resultado.geradoEm)).not.toThrow();
+    expect(new Date(resultado.geradoEm).toISOString()).toBe(resultado.geradoEm);
+  });
+
+  it('integração: retorna mercadoUnico e combinacao corretos para matriz conhecida', async () => {
+    mockBuscar.mockResolvedValue(
+      buildMatriz({
+        arroz: { Mercado_A: 10, Mercado_B: 7 },
+        feijao: { Mercado_A: 4, Mercado_B: 8 },
+      }),
+    );
+    const resultado = await analisarCarrinho({
+      itens: [
+        { produto: 'arroz', quantidade: 1 },
+        { produto: 'feijao', quantidade: 1 },
+      ],
+    });
+    // Mercado_A = 14, Mercado_B = 15 → Mercado_A vence
+    expect(resultado.mercadoUnico!.mercado).toBe('Mercado_A');
+    expect(resultado.mercadoUnico!.total).toBe(14);
+    // Combinação ótima: arroz em B (7) + feijao em A (4) = 11
+    expect(resultado.combinacao.total).toBe(11);
+    expect(resultado.naoEncontradosEmNenhumMercado).toHaveLength(0);
+  });
+});
 
 // ─────────────────────────────────────────────
 // calcularMercadoUnico
