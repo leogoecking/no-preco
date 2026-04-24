@@ -26,7 +26,8 @@ describe('cn', () => {
   })
 
   it('ignora valores falsy', () => {
-    expect(cn('a', false && 'b', undefined, 'c')).toBe('a c')
+    const show = false
+    expect(cn('a', show && 'b', undefined, 'c')).toBe('a c')
   })
 
   it('resolve conflito de utilitários Tailwind — última vence', () => {
