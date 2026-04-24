@@ -56,7 +56,7 @@ describe('calcularMercadoUnico', () => {
     const resultado = calcularMercadoUnico(itens('arroz', 'feijao'), matriz);
     // Mercado_A = 15, Mercado_B = 15 — empate — A vence por ordem de iteração
     expect(resultado).not.toBeNull();
-    expect(resultado!.totalCarrinho).toBe(15);
+    expect(resultado!.total).toBe(15);
   });
 
   it('prefere mercado com maior cobertura mesmo que mais caro', () => {
@@ -82,7 +82,7 @@ describe('calcularMercadoUnico', () => {
   it('respeita quantidade na soma do total', () => {
     const matriz = buildMatriz({ arroz: { Mercado_A: 10 } });
     const resultado = calcularMercadoUnico([{ produto: 'arroz', quantidade: 3 }], matriz);
-    expect(resultado!.totalCarrinho).toBe(30);
+    expect(resultado!.total).toBe(30);
   });
 });
 
@@ -97,7 +97,7 @@ describe('calcularCombinacaoOtima', () => {
       feijao: { Mercado_A: 4, Mercado_B: 6 },
     });
     const resultado = calcularCombinacaoOtima(itens('arroz', 'feijao'), matriz);
-    expect(resultado.totalCarrinho).toBe(11); // arroz=7 + feijao=4
+    expect(resultado.total).toBe(11); // arroz=7 + feijao=4
     expect(resultado.mercadosNecessarios).toBe(2);
   });
 
@@ -108,7 +108,7 @@ describe('calcularCombinacaoOtima', () => {
     });
     const resultado = calcularCombinacaoOtima(itens('arroz', 'feijao'), matriz);
     expect(resultado.mercadosNecessarios).toBe(1);
-    expect(resultado.resumoPorMercado[0]!.mercado).toBe('Mercado_A');
+    expect(resultado.mercados[0]).toBe('Mercado_A');
   });
 
   it('registra produtos não encontrados em itensFaltantes', () => {
@@ -121,7 +121,7 @@ describe('calcularCombinacaoOtima', () => {
   it('respeita quantidade no subtotal', () => {
     const matriz = buildMatriz({ arroz: { Mercado_A: 5 } });
     const resultado = calcularCombinacaoOtima([{ produto: 'arroz', quantidade: 4 }], matriz);
-    expect(resultado.totalCarrinho).toBe(20);
+    expect(resultado.total).toBe(20);
     expect(resultado.itens[0]!.subtotal).toBe(20);
   });
 });
@@ -134,9 +134,10 @@ function opcao1(overrides: Partial<OpcaoMercadoUnico> = {}): OpcaoMercadoUnico {
   return {
     mercado: 'Mercado_A',
     cnpj: '00',
-    totalCarrinho: 100,
+    total: 100,
     cobertura: 1,
-    itensCobertos: [],
+    itensEncontrados: 0,
+    itens: [],
     itensFaltantes: [],
     ...overrides,
   };
@@ -144,82 +145,79 @@ function opcao1(overrides: Partial<OpcaoMercadoUnico> = {}): OpcaoMercadoUnico {
 
 function opcao2(overrides: Partial<OpcaoCombinacao> = {}): OpcaoCombinacao {
   return {
-    totalCarrinho: 80,
+    total: 80,
     mercadosNecessarios: 2,
+    mercados: ['Mercado_B', 'Mercado_C'],
     itens: [],
-    resumoPorMercado: [
-      { mercado: 'Mercado_B', cnpj: '01', subtotal: 50, itens: [] },
-      { mercado: 'Mercado_C', cnpj: '02', subtotal: 30, itens: [] },
-    ],
     itensFaltantes: [],
     ...overrides,
   };
 }
 
 describe('gerarDecisao', () => {
-  it('retorna SEM_DADOS quando não há opcao1 e opcao2 sem itens', () => {
+  it('retorna sem_dados quando não há opcao1 e opcao2 sem itens', () => {
     const resultado = gerarDecisao(
       null,
-      opcao2({ itens: [], totalCarrinho: 0, mercadosNecessarios: 0, resumoPorMercado: [] }),
+      opcao2({ itens: [], total: 0, mercadosNecessarios: 0, mercados: [] }),
     );
-    expect(resultado.recomendacao).toBe('SEM_DADOS');
+    expect(resultado.recomendacao).toBe('sem_dados');
   });
 
-  it('retorna COMBINACAO quando opcao1 é null mas há itens', () => {
+  it('retorna combinacao quando opcao1 é null mas há itens', () => {
     const resultado = gerarDecisao(
       null,
       opcao2({
         itens: [
-          { produto: 'x', quantidade: 1, precoUnitario: 1, subtotal: 1, mercado: 'M', cnpj: '0' },
+          { produto: 'x', quantidade: 1, preco: 1, subtotal: 1, mercado: 'M', cnpj: '0' },
         ],
       }),
     );
-    expect(resultado.recomendacao).toBe('COMBINACAO');
+    expect(resultado.recomendacao).toBe('combinacao');
   });
 
-  it('retorna COMBINACAO quando cobertura do mercado único é incompleta', () => {
+  it('retorna combinacao quando cobertura do mercado único é incompleta', () => {
     const resultado = gerarDecisao(opcao1({ cobertura: 0.5 }), opcao2());
-    expect(resultado.recomendacao).toBe('COMBINACAO');
+    expect(resultado.recomendacao).toBe('combinacao');
     expect(resultado.motivo).toContain('50%');
   });
 
-  it('retorna MERCADO_UNICO quando combinação converge para 1 mercado', () => {
+  it('retorna mercado_unico quando combinação converge para 1 mercado', () => {
     const resultado = gerarDecisao(
       opcao1(),
       opcao2({
         mercadosNecessarios: 1,
-        resumoPorMercado: [{ mercado: 'Mercado_B', cnpj: '01', subtotal: 80, itens: [] }],
+        mercados: ['Mercado_B'],
       }),
     );
-    expect(resultado.recomendacao).toBe('MERCADO_UNICO');
+    expect(resultado.recomendacao).toBe('mercado_unico');
     expect(resultado.motivo).toContain('Mercado_B');
   });
 
-  it('retorna COMBINACAO quando economia supera o limiar de 5%', () => {
+  it('retorna combinacao quando economia supera o limiar de 5%', () => {
     const resultado = gerarDecisao(
-      opcao1({ totalCarrinho: 100 }),
-      opcao2({ totalCarrinho: 80, mercadosNecessarios: 2 }),
+      opcao1({ total: 100 }),
+      opcao2({ total: 80, mercadosNecessarios: 2 }),
     );
-    expect(resultado.recomendacao).toBe('COMBINACAO');
-    expect(resultado.economiaAbsoluta).toBe(20);
+    expect(resultado.recomendacao).toBe('combinacao');
+    expect(resultado.economia).toBe(20);
     expect(resultado.economiaPercent).toBe(20);
   });
 
-  it('retorna MERCADO_UNICO quando economia é menor que 5%', () => {
+  it('retorna mercado_unico quando economia é menor que 5%', () => {
     const resultado = gerarDecisao(
-      opcao1({ totalCarrinho: 100 }),
-      opcao2({ totalCarrinho: 97, mercadosNecessarios: 2 }),
+      opcao1({ total: 100 }),
+      opcao2({ total: 97, mercadosNecessarios: 2 }),
     );
-    expect(resultado.recomendacao).toBe('MERCADO_UNICO');
-    expect(resultado.economiaAbsoluta).toBe(3);
+    expect(resultado.recomendacao).toBe('mercado_unico');
+    expect(resultado.economia).toBe(3);
   });
 
   it('inclui economia absoluta e percentual corretas', () => {
     const resultado = gerarDecisao(
-      opcao1({ totalCarrinho: 200 }),
-      opcao2({ totalCarrinho: 150, mercadosNecessarios: 2 }),
+      opcao1({ total: 200 }),
+      opcao2({ total: 150, mercadosNecessarios: 2 }),
     );
-    expect(resultado.economiaAbsoluta).toBe(50);
+    expect(resultado.economia).toBe(50);
     expect(resultado.economiaPercent).toBe(25);
   });
 });
