@@ -3,7 +3,7 @@ import { prisma } from '../../shared/database/prisma';
 import { diasAtras } from '../../shared/utils/date';
 import { normalizarSlug } from '../../shared/utils/normalize';
 import { Logger } from '../../shared/logger/logger';
-import { PrecoRow } from './preco.model';
+import { PrecoRow, ResumoPreco, Tendencia } from './preco.model';
 import { ProdutoPreco } from '../scraper/scraper.types';
 
 const log = new Logger('PrecoRepository');
@@ -45,6 +45,7 @@ export interface IPrecoRepository {
   buscarHistorico(produto: string, opcoes?: HistoricoOptions): Promise<PrecoRow[]>;
   buscarUltimoPreco(produto: string, municipio?: string): Promise<PrecoRow | null>;
   contarRegistros(produto: string): Promise<number>;
+  buscarStatsBatch(produtos: string[], municipio?: string): Promise<Map<string, ResumoPreco>>;
 }
 
 // ─────────────────────────────────────────────
@@ -347,6 +348,88 @@ export class PrecoRepository implements IPrecoRepository {
     );
     return Number(rows[0]?.total ?? 0n);
   }
+
+  async buscarStatsBatch(
+    produtos: string[],
+    municipio?: string,
+  ): Promise<Map<string, ResumoPreco>> {
+    if (produtos.length === 0) return new Map();
+
+    const produtosNorm = produtos.map((p) => p.toLowerCase().trim());
+    const municipioWhere = municipio
+      ? Prisma.sql`AND municipio ILIKE ${'%' + municipio + '%'}`
+      : Prisma.empty;
+
+    const [rowsAtual, rowsHistorico] = await Promise.all([
+      prisma.$queryRaw<{ produto: string; precoMinAtual: number }[]>(
+        Prisma.sql`
+          SELECT produto, MIN(preco)::float8 AS "precoMinAtual"
+          FROM precos
+          WHERE produto = ANY(${produtosNorm})
+            AND preco > 0
+            ${municipioWhere}
+          GROUP BY produto
+        `,
+      ),
+      prisma.$queryRaw<{ produto: string; preco: number; dataColeta: Date }[]>(
+        Prisma.sql`
+          SELECT p.produto, h.preco::float8 AS preco, h."dataColeta"
+          FROM precos_historico h
+          JOIN precos p ON p.id = h."precoId"
+          WHERE p.produto = ANY(${produtosNorm})
+            AND h."dataColeta" >= NOW() - INTERVAL '30 days'
+            AND h.preco > 0
+            ${municipioWhere}
+          ORDER BY p.produto, h."dataColeta" ASC
+          LIMIT 500
+        `,
+      ),
+    ]);
+
+    const atualMap = new Map(rowsAtual.map((r) => [r.produto, r.precoMinAtual]));
+
+    const historicoMap = new Map<string, { preco: number; dataColeta: Date }[]>();
+    for (const row of rowsHistorico) {
+      if (!historicoMap.has(row.produto)) historicoMap.set(row.produto, []);
+      historicoMap.get(row.produto)!.push(row);
+    }
+
+    const result = new Map<string, ResumoPreco>();
+
+    for (const produto of produtosNorm) {
+      const precoMinAtual = atualMap.get(produto);
+      if (precoMinAtual === undefined) continue;
+
+      const hist = historicoMap.get(produto) ?? [];
+      const precos = hist.map((h) => h.preco);
+
+      const precoMin30d = precos.length > 0 ? Math.min(...precos) : precoMinAtual;
+      const precoMedio30d =
+        precos.length > 0 ? precos.reduce((a, b) => a + b, 0) / precos.length : precoMinAtual;
+
+      const variacaoVsMedia30d =
+        precoMedio30d > 0
+          ? Math.round(((precoMinAtual - precoMedio30d) / precoMedio30d) * 1000) / 10
+          : 0;
+
+      const ehMinimoHistorico = precoMinAtual <= precoMin30d * 1.05;
+
+      result.set(produto, {
+        precoMinAtual,
+        precoMin30d,
+        precoMedio30d,
+        variacaoVsMedia30d,
+        ehMinimoHistorico,
+        tendencia: calcularTendencia(precos),
+        sparkline: hist.slice(-8).map((h) => ({
+          preco: h.preco,
+          dataColeta: h.dataColeta.toISOString(),
+        })),
+      });
+    }
+
+    return result;
+  }
 }
 
 export const precoRepository = new PrecoRepository();
@@ -461,6 +544,17 @@ type HistoricoJoinRow = {
   registradoEm: Date;
   atualizadoEm: Date;
 };
+
+function calcularTendencia(precos: number[]): Tendencia {
+  if (precos.length < 4) return 'estavel';
+  const mid = Math.floor(precos.length / 2);
+  const avgFirst = precos.slice(0, mid).reduce((a, b) => a + b, 0) / mid;
+  const avgSecond = precos.slice(mid).reduce((a, b) => a + b, 0) / (precos.length - mid);
+  const diff = (avgSecond - avgFirst) / avgFirst;
+  if (diff < -0.03) return 'caindo';
+  if (diff > 0.03) return 'subindo';
+  return 'estavel';
+}
 
 function mapHistoricoJoinRow(row: HistoricoJoinRow): PrecoRow {
   return {

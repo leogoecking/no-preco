@@ -44,3 +44,10 @@ export const HistoricoQuerySchema = z.object({
 });
 
 export type HistoricoQuery = z.infer<typeof HistoricoQuerySchema>;
+
+export const StatsBodySchema = z.object({
+  produtos: z.array(z.string().trim().min(1).max(100)).min(1).max(50),
+  municipio: z.string().trim().max(100).optional(),
+});
+
+export type StatsBody = z.infer<typeof StatsBodySchema>;

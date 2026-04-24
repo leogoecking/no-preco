@@ -1,13 +1,14 @@
 import { Router } from 'express';
-import { buscar, buscarPorEan, historico } from './scraper.controller';
+import { buscar, buscarPorEan, historico, stats } from './scraper.controller';
 import { limiterLeitura } from '../../shared/middleware/rate-limiter';
-import { validateQuery, validateParams } from '../../shared/validation/validate';
+import { validateQuery, validateParams, validateBody } from '../../shared/validation/validate';
 import { asyncHandler } from '../../shared/middleware/async-handler';
 import {
   BuscarQuerySchema,
   BuscarEanParamsSchema,
   BuscarEanQuerySchema,
   HistoricoQuerySchema,
+  StatsBodySchema,
 } from './scraper.schemas';
 
 export const scraperRouter = Router();
@@ -30,4 +31,10 @@ scraperRouter.get(
   limiterLeitura,
   validateQuery(HistoricoQuerySchema),
   asyncHandler(historico),
+);
+scraperRouter.post(
+  '/produtos/stats',
+  limiterLeitura,
+  validateBody(StatsBodySchema),
+  asyncHandler(stats),
 );

@@ -5,7 +5,8 @@ import { ProdutoPreco, ResultadoBusca } from './scraper.types';
 import { buildKey, cacheRapido } from '../../shared/cache/app-cache';
 import { withCache } from '../../shared/cache/with-cache';
 import { Logger } from '../../shared/logger/logger';
-import { BuscarQuery, BuscarEanQuery, HistoricoQuery } from './scraper.schemas';
+import { BuscarQuery, BuscarEanQuery, HistoricoQuery, StatsBody } from './scraper.schemas';
+import { ResumoPreco } from '../preco/preco.model';
 
 const log = new Logger('ScraperController');
 
@@ -95,6 +96,13 @@ export async function historico(req: Request, res: Response): Promise<void> {
     },
   );
   res.status(200).json(resposta);
+}
+
+export async function stats(req: Request, res: Response): Promise<void> {
+  const { produtos, municipio } = req.validatedBody as StatsBody;
+  const resumos = await precoRepository.buscarStatsBatch(produtos, municipio);
+  const resultado: Record<string, ResumoPreco> = Object.fromEntries(resumos);
+  res.status(200).json(resultado);
 }
 
 interface FallbackParams {
