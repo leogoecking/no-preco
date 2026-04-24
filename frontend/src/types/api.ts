@@ -125,3 +125,17 @@ export interface StatusColeta {
   municipioPadrao: string
   ultimoRelatorio: RelatorioColeta | null
 }
+
+export type Tendencia = 'caindo' | 'subindo' | 'estavel'
+
+export interface ResumoPreco {
+  precoMinAtual: number
+  precoMin30d: number
+  precoMedio30d: number
+  variacaoVsMedia30d: number
+  ehMinimoHistorico: boolean
+  tendencia: Tendencia
+  sparkline: { preco: number; dataColeta: string }[]
+}
+
+export type StatsResponse = Record<string, ResumoPreco>

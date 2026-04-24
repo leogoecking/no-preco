@@ -9,7 +9,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { formatBRL } from '@/lib/utils'
 import { HistoricoSheet } from '@/components/HistoricoSheet'
-import type { ItemPreco } from '@/types/api'
+import { MiniInsight } from '@/components/MiniInsight'
+import type { ItemPreco, StatsResponse } from '@/types/api'
 
 export function BuscaProduto() {
   const [termo, setTermo] = useState('')
@@ -41,6 +42,15 @@ export function BuscaProduto() {
     : (dataTermo?.itens ?? [])
 
   const totalItens = isEan ? (dataEan?.totalItens ?? 0) : (dataTermo?.totalItens ?? 0)
+
+  const produtos = itens.map((i) => i.produto)
+  const { data: statsData, isFetching: fetchingStats } = useQuery({
+    queryKey: ['stats', busca],
+    queryFn: () => api.stats(produtos),
+    enabled: itens.length > 0,
+    staleTime: 1000 * 60 * 5,
+  })
+  const statsMap: StatsResponse = statsData ?? {}
   const hasData = isEan ? !!dataEan : !!dataTermo
   const fonteAoVivo = isEan && dataEan?.fonte === 'scrape_ao_vivo'
 
@@ -114,6 +124,7 @@ export function BuscaProduto() {
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-gray-900 truncate">{item.produto}</p>
                       <p className="text-sm text-gray-500 truncate">{item.mercado}</p>
+                      <MiniInsight resumo={statsMap[item.produto]} isLoading={fetchingStats} />
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="text-lg font-bold text-blue-600">

@@ -37,6 +37,7 @@ import type {
   ResultadoHistorico,
   StatusColeta,
   ItemCarrinho,
+  StatsResponse,
 } from '@/types/api'
 
 export const EAN_REGEX = /^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/
@@ -69,4 +70,7 @@ export const api = {
       { produto, municipio },
       token,
     ),
+
+  stats: (produtos: string[]) =>
+    post<StatsResponse>('/produtos/stats', { produtos, municipio: MUNICIPIO }),
 }
