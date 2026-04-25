@@ -54,7 +54,8 @@ export interface ScraperError {
     | 'TIMEOUT'
     | 'PARSE_FALHOU'
     | 'SEM_RESULTADOS'
-    | 'ERRO_REDE';
+    | 'ERRO_REDE'
+    | 'BROWSER_INDISPONIVEL';
   mensagem: string;
   detalhes?: string;
   urlTentada?: string;

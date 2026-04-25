@@ -222,6 +222,7 @@ export class ColetaWorker {
         produto: produto.label,
         municipio,
         erro: mensagem,
+        detalhes: scraperErr.detalhes,
         tipo: scraperErr.tipo ?? 'DESCONHECIDO',
         duracaoMs: Date.now() - inicio,
       });

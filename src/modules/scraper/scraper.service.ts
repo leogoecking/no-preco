@@ -350,6 +350,16 @@ function classificarErro(err: unknown): ScraperError['tipo'] {
   const tipoExplicito = (err as Error & { tipo?: ScraperError['tipo'] }).tipo;
   if (tipoExplicito === 'BLOQUEIO_403' || tipoExplicito === 'BLOQUEIO_429') return tipoExplicito;
 
+  const mensagem = err instanceof Error ? err.message : String(err);
+  if (
+    mensagem.includes('Could not find Chrome') ||
+    mensagem.includes('Failed to launch the browser process') ||
+    mensagem.includes('Target closed') ||
+    mensagem.includes('Browser was not found')
+  ) {
+    return 'BROWSER_INDISPONIVEL';
+  }
+
   const axiosErr = err as AxiosError;
   if (axiosErr.code === 'ECONNABORTED') return 'TIMEOUT';
   if (axiosErr.response?.status === 429) return 'BLOQUEIO_429';
