@@ -1,4 +1,4 @@
-import { buscarProdutos } from '../modules/scraper/scraper.service';
+import { buscarProdutos, probarConectividade } from '../modules/scraper/scraper.service';
 import { precoRepository } from '../modules/preco/preco.repository';
 import { ScraperError } from '../modules/scraper/scraper.types';
 import { coletaConfig, GrupoColeta, ProdutoMonitorado } from './coleta.config';
@@ -121,6 +121,28 @@ export class ColetaWorker {
       municipioPadrao: coletaConfig.municipioPadrao,
       ...(opts.grupo !== undefined ? { grupo: opts.grupo } : {}),
     });
+
+    // Probe canário: antes de gastar uma tarefa real, valida que o alvo aceita
+    // estabelecer sessão. Se já estiver bloqueando, aborta limpo com tarefa
+    // sintética para o WorkerScheduler reconhecer como bloqueio.
+    if (tarefas.length > 0) {
+      const probe = await probarConectividade();
+      if (!probe.ok && (probe.tipo === 'BLOQUEIO_429' || probe.tipo === 'BLOQUEIO_403')) {
+        this.log.error('Probe canário detectou bloqueio — abortando ciclo antes de iniciar', {
+          tipo: probe.tipo,
+          mensagem: probe.mensagem,
+        });
+        this.abortController.abort();
+        resultados.push({
+          produto: '__probe__',
+          municipio: coletaConfig.municipioPadrao,
+          status: 'erro',
+          erro: probe.mensagem ?? 'Bloqueio detectado pelo probe',
+          tipoErro: probe.tipo,
+          duracaoMs: 0,
+        });
+      }
+    }
 
     try {
       for (let i = 0; i < tarefas.length; i++) {

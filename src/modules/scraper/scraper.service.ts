@@ -1,6 +1,16 @@
 import * as cheerio from 'cheerio';
 import { AxiosError } from 'axios';
-import { getSharedPage, invalidateSharedPage } from '../../shared/http/browser-client';
+import {
+  getSharedPage,
+  invalidateSharedPage,
+  resetBrowserSession,
+} from '../../shared/http/browser-client';
+import {
+  scraperHttpClient,
+  invalidateScraperHttpSession,
+  HttpResponse,
+  ProbeResult,
+} from '../../shared/http/scraper-http-client';
 import { normalizarSlug } from '../../shared/utils/normalize';
 import { Logger } from '../../shared/logger/logger';
 import { BuscaParams, ProdutoPreco, ResultadoBusca, ScraperError } from './scraper.types';
@@ -10,6 +20,55 @@ const log = new Logger('Scraper');
 const BASE_URL = 'https://precodahora.ba.gov.br';
 // O site usa POST /produtos/ como endpoint de busca (confirmado via diagnóstico de rede).
 const ENDPOINT_PESQUISA = '/produtos/';
+
+// ─────────────────────────────────────────────
+// Métricas in-memory (boot-relativas)
+//
+// Servem para decidir empiricamente quando remover o fallback Puppeteer:
+// se `browserAcionado` ficar em zero por dias seguidos, é seguro remover.
+// Reseta a cada restart — sem persistência intencional.
+// ─────────────────────────────────────────────
+
+export interface ScraperMetrics {
+  httpSucesso: number;
+  httpFalha: number;
+  browserAcionado: number;
+  browserSucesso: number;
+  browserFalha: number;
+  bloqueio429: number;
+  bloqueio403: number;
+  ultimoEvento: { tipo: string; em: string } | null;
+  iniciadoEm: string;
+}
+
+const metrics: ScraperMetrics = {
+  httpSucesso: 0,
+  httpFalha: 0,
+  browserAcionado: 0,
+  browserSucesso: 0,
+  browserFalha: 0,
+  bloqueio429: 0,
+  bloqueio403: 0,
+  ultimoEvento: null,
+  iniciadoEm: new Date().toISOString(),
+};
+
+function registrarEvento(tipo: keyof Omit<ScraperMetrics, 'ultimoEvento' | 'iniciadoEm'>): void {
+  metrics[tipo]++;
+  metrics.ultimoEvento = { tipo, em: new Date().toISOString() };
+}
+
+export function getScraperMetrics(): ScraperMetrics {
+  return { ...metrics };
+}
+
+/**
+ * Valida conectividade com o alvo via GET leve (probe canário).
+ * Usado pelo worker para evitar gastar tarefa quando o alvo já está negando acesso.
+ */
+export async function probarConectividade(): Promise<ProbeResult> {
+  return scraperHttpClient.probe();
+}
 
 // ─────────────────────────────────────────────
 // Estratégia única: Page compartilhada (Puppeteer)
@@ -82,17 +141,18 @@ async function executarFetchNoBrowser(
   } catch (err) {
     const mensagem = err instanceof Error ? err.message : String(err);
     log.warn('page.evaluate(fetch) lançou exceção', { termo, erro: mensagem });
-    invalidateSharedPage();
 
     // "Execution context was destroyed" = página navegou/redirecionou durante o
     // evaluate. No site alvo isso ocorre quando um IP suspeito é redirecionado
     // para página de erro/captcha — tratar como bloqueio ativo.
     if (mensagem.includes('Execution context was destroyed')) {
+      await resetBrowserSession();
       throw Object.assign(new Error('Navegação forçada durante evaluate — bloqueio provável'), {
         tipo: 'BLOQUEIO_403',
       });
     }
 
+    invalidateSharedPage();
     throw err;
   }
 }
@@ -109,15 +169,13 @@ async function interpretarResposta(
   });
 
   if (resultado.status === 429 || resultado.status === 403) {
-    invalidateSharedPage();
+    await resetBrowserSession();
     const tipo: ScraperError['tipo'] = resultado.status === 429 ? 'BLOQUEIO_429' : 'BLOQUEIO_403';
     throw Object.assign(new Error(`Rate limit ${resultado.status} no POST de busca`), { tipo });
   }
 
   if (resultado.status === 202) {
-    log.warn('Site retornou 202 — parâmetros rejeitados', {
-      preview: resultado.body.slice(0, 200),
-    });
+    logar202(resultado.body);
     return [];
   }
 
@@ -130,7 +188,7 @@ async function interpretarResposta(
 
   const bloqueio = detectarBloqueioNoBody(dadosApi);
   if (bloqueio) {
-    invalidateSharedPage();
+    await resetBrowserSession();
     throw Object.assign(new Error(`Bloqueio embutido no body (codigo=${bloqueio.codigo})`), {
       tipo: bloqueio.tipo,
     });
@@ -147,7 +205,77 @@ async function interpretarResposta(
 }
 
 // ─────────────────────────────────────────────
+// Caminho primário: HTTP direto
+//
+// Replica o que o JS do site faz: GET inicial para capturar cookies + CSRF
+// (extraído do cookie `session` Flask), depois POST com header X-CSRFToken.
+// Sem browser headless → sem detecção por fingerprint Puppeteer.
+// ─────────────────────────────────────────────
+
+async function buscarViaHttp(params: BuscaParams): Promise<ProdutoPreco[]> {
+  const body = montarBodyBusca(params);
+  let resposta: HttpResponse;
+
+  try {
+    resposta = await scraperHttpClient.post(body);
+  } catch (err) {
+    invalidateScraperHttpSession();
+    throw err;
+  }
+
+  log.info('POST /produtos/ via HTTP', {
+    status: resposta.status,
+    termo: params.termo,
+    preview: resposta.body.slice(0, 150),
+  });
+
+  if (resposta.status === 429 || resposta.status === 403) {
+    invalidateScraperHttpSession();
+    const tipo: ScraperError['tipo'] = resposta.status === 429 ? 'BLOQUEIO_429' : 'BLOQUEIO_403';
+    throw Object.assign(new Error(`Rate limit ${resposta.status} no POST de busca`), { tipo });
+  }
+
+  if (resposta.status === 401) {
+    invalidateScraperHttpSession();
+    throw Object.assign(new Error(`Sessão HTTP rejeitada (status 401)`), {
+      tipo: 'PARSE_FALHOU' as ScraperError['tipo'],
+    });
+  }
+
+  if (resposta.status === 202) {
+    logar202(resposta.body);
+    return [];
+  }
+
+  let dadosApi: unknown = null;
+  try {
+    dadosApi = JSON.parse(resposta.body);
+  } catch {
+    log.warn('Resposta HTTP não é JSON', { preview: resposta.body.slice(0, 300) });
+  }
+
+  const bloqueio = detectarBloqueioNoBody(dadosApi);
+  if (bloqueio) {
+    invalidateScraperHttpSession();
+    throw Object.assign(new Error(`Bloqueio embutido no body (codigo=${bloqueio.codigo})`), {
+      tipo: bloqueio.tipo,
+    });
+  }
+
+  if (dadosApi !== null) {
+    return extrairItens(dadosApi);
+  }
+
+  return [];
+}
+
+// ─────────────────────────────────────────────
 // Orquestrador
+//
+// Estratégia: tenta HTTP direto primeiro. Bloqueios reais (429/403)
+// propagam imediatamente — não vale tentar browser, vai esbarrar igual.
+// Outros erros (401, parse, rede) caem no fallback de browser para
+// resiliência caso o site mude o esquema CSRF.
 // ─────────────────────────────────────────────
 
 export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusca> {
@@ -155,15 +283,47 @@ export async function buscarProdutos(params: BuscaParams): Promise<ResultadoBusc
   let itens: ProdutoPreco[] = [];
 
   try {
-    itens = await buscarViaBrowser(params);
-  } catch (browserErr) {
-    const scraperErr = buildScraperError(
-      classificarErro(browserErr),
-      'Falha na busca via browser compartilhado',
-      browserErr,
-      BASE_URL + ENDPOINT_PESQUISA,
-    );
-    throw Object.assign(new Error(scraperErr.mensagem), scraperErr);
+    itens = await buscarViaHttp(params);
+    registrarEvento('httpSucesso');
+  } catch (httpErr) {
+    const tipoHttp = classificarErro(httpErr);
+    registrarEvento('httpFalha');
+
+    // Bloqueios reais não merecem fallback — propagar
+    if (tipoHttp === 'BLOQUEIO_429' || tipoHttp === 'BLOQUEIO_403') {
+      registrarEvento(tipoHttp === 'BLOQUEIO_429' ? 'bloqueio429' : 'bloqueio403');
+      const scraperErr = buildScraperError(
+        tipoHttp,
+        'Bloqueio detectado no caminho HTTP',
+        httpErr,
+        BASE_URL + ENDPOINT_PESQUISA,
+      );
+      throw Object.assign(new Error(scraperErr.mensagem), scraperErr);
+    }
+
+    log.warn('HTTP falhou — acionando fallback via browser', {
+      tipo: tipoHttp,
+      erro: httpErr instanceof Error ? httpErr.message : String(httpErr),
+    });
+    registrarEvento('browserAcionado');
+
+    try {
+      itens = await buscarViaBrowser(params);
+      registrarEvento('browserSucesso');
+    } catch (browserErr) {
+      registrarEvento('browserFalha');
+      const tipoBrowser = classificarErro(browserErr);
+      if (tipoBrowser === 'BLOQUEIO_429') registrarEvento('bloqueio429');
+      else if (tipoBrowser === 'BLOQUEIO_403') registrarEvento('bloqueio403');
+
+      const scraperErr = buildScraperError(
+        tipoBrowser,
+        'Falha em ambos os caminhos (HTTP e browser)',
+        browserErr,
+        BASE_URL + ENDPOINT_PESQUISA,
+      );
+      throw Object.assign(new Error(scraperErr.mensagem), scraperErr);
+    }
   }
 
   const municipioResolvido = itens.find((i) => i.municipio)?.municipio ?? params.municipio;
@@ -365,6 +525,29 @@ function classificarErro(err: unknown): ScraperError['tipo'] {
   if (axiosErr.response?.status === 429) return 'BLOQUEIO_429';
   if (axiosErr.response?.status === 403) return 'BLOQUEIO_403';
   return 'PARSE_FALHOU';
+}
+
+/**
+ * Loga uma resposta HTTP 202 do alvo já normalizada por `codigo`.
+ * `codigo:50` = sem resultados (info); demais códigos = comportamento
+ * inesperado e merecem warn para diagnóstico.
+ */
+function logar202(body: string): void {
+  let codigo: number | null = null;
+  let descricao = '';
+  try {
+    const json = JSON.parse(body) as { codigo?: unknown; descricao?: unknown };
+    codigo = typeof json.codigo === 'number' ? json.codigo : null;
+    descricao = typeof json.descricao === 'string' ? json.descricao : '';
+  } catch {
+    // mantém vazios — body não-JSON cai naturalmente no log de inesperado
+  }
+
+  if (codigo === 50) {
+    log.info('Site retornou 202 — sem resultados', { codigo, descricao });
+  } else {
+    log.warn('Site retornou 202 — comportamento inesperado', { codigo, descricao });
+  }
 }
 
 /**

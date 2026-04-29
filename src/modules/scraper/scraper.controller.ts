@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { precoRepository, PrecoRecente } from '../preco/preco.repository';
-import { buscarProdutos } from './scraper.service';
+import { buscarProdutos, getScraperMetrics } from './scraper.service';
 import { ProdutoPreco, ResultadoBusca } from './scraper.types';
 import { buildKey, cacheRapido } from '../../shared/cache/app-cache';
 import { withCache } from '../../shared/cache/with-cache';
@@ -103,6 +103,14 @@ export async function stats(req: Request, res: Response): Promise<void> {
   const resumos = await precoRepository.buscarStatsBatch(produtos, municipio);
   const resultado: Record<string, ResumoPreco> = Object.fromEntries(resumos);
   res.status(200).json(resultado);
+}
+
+export function diag(_req: Request, res: Response): void {
+  const m = getScraperMetrics();
+  res.status(200).json({
+    metricas: m,
+    uptimeSec: Math.floor(process.uptime()),
+  });
 }
 
 interface FallbackParams {

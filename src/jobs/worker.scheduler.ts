@@ -1,6 +1,8 @@
 import cron from 'node-cron';
 import { ColetaWorker, coletaWorker, RelatorioColeta, WorkerStatus } from './coleta.worker';
 import { GrupoColeta } from './coleta.config';
+import { resetBrowserSession } from '../shared/http/browser-client';
+import { invalidateScraperHttpSession } from '../shared/http/scraper-http-client';
 import { Logger } from '../shared/logger/logger';
 
 const CRON_PADRAO = '0 */6 * * *'; // a cada 6 horas (00h, 06h, 12h, 18h)
@@ -141,9 +143,11 @@ export class WorkerScheduler {
         return;
       }
 
-      // Pausa expirou — reset automático
+      // Pausa expirou — reset automático em ambos os caminhos
       this.pausaAteMs = null;
       this.consecutivosBloqueio = 0;
+      invalidateScraperHttpSession();
+      await resetBrowserSession();
       this.log.info('Circuit breaker resetado — retomando coletas normalmente');
     }
 

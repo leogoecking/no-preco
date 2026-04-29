@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { buscar, buscarPorEan, historico, stats } from './scraper.controller';
+import { buscar, buscarPorEan, diag, historico, stats } from './scraper.controller';
 import { limiterLeitura } from '../../shared/middleware/rate-limiter';
 import { validateQuery, validateParams, validateBody } from '../../shared/validation/validate';
 import { asyncHandler } from '../../shared/middleware/async-handler';
@@ -38,3 +38,4 @@ scraperRouter.post(
   validateBody(StatsBodySchema),
   asyncHandler(stats),
 );
+scraperRouter.get('/produtos/diag', limiterLeitura, diag);

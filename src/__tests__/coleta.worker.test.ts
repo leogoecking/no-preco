@@ -12,6 +12,7 @@ jest.mock('../jobs/coleta.config', () => ({
 }));
 jest.mock('../modules/scraper/scraper.service', () => ({
   buscarProdutos: jest.fn(),
+  probarConectividade: jest.fn().mockResolvedValue({ ok: true }),
 }));
 jest.mock('../modules/preco/preco.repository', () => ({
   precoRepository: { salvarLote: jest.fn() },
