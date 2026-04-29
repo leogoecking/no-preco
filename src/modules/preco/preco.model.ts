@@ -1,3 +1,5 @@
+export type FonteColeta = 'api' | 'html' | 'browser';
+
 export interface IPreco {
   produto: string;
   preco: number;
@@ -9,7 +11,7 @@ export interface IPreco {
   unidade?: string | null;
   ean?: string | null;
   dataColeta: Date;
-  fonte: 'api' | 'html' | 'browser';
+  fonte: FonteColeta;
 }
 
 export interface PrecoRow extends IPreco {
@@ -23,7 +25,7 @@ export interface HistoricoPrecoRow {
   precoId: number;
   preco: number;
   dataColeta: Date;
-  fonte: 'api' | 'html' | 'browser';
+  fonte: FonteColeta;
   registradoEm: Date;
 }
 

@@ -387,3 +387,88 @@ describe('PrecoRepository.buscarUltimoPreco', () => {
     expect(result!.precoAnterior).toBe(23.5);
   });
 });
+
+// ─────────────────────────────────────────────
+// buscarStatsBatch
+// ─────────────────────────────────────────────
+
+describe('PrecoRepository.buscarStatsBatch', () => {
+  it('retorna Map vazio e não chama o banco quando produtos é vazio', async () => {
+    const result = await repo.buscarStatsBatch([]);
+    expect(result.size).toBe(0);
+    expect(mockQueryRaw).not.toHaveBeenCalled();
+  });
+
+  it('filtra por cidade slug (não ILIKE em municipio) e usa o slug normalizado', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([{ produto: 'arroz 5kg', precoMinAtual: 25.9 }])
+      .mockResolvedValueOnce([]);
+
+    await repo.buscarStatsBatch(['Arroz 5kg'], 'Teixeira de Freitas');
+
+    const [[sqlAtual], [sqlHist]] = mockQueryRaw.mock.calls as [
+      [{ strings: readonly string[]; values: unknown[] }],
+      [{ strings: readonly string[]; values: unknown[] }],
+    ];
+
+    const sqlAtualStr = sqlAtual.strings.join(' ');
+    expect(sqlAtualStr).toContain('cidade =');
+    expect(sqlAtualStr).not.toContain('ILIKE');
+    expect(sqlAtual.values).toContain('teixeira-de-freitas');
+
+    const sqlHistStr = sqlHist.strings.join(' ');
+    expect(sqlHistStr).toContain('p.cidade =');
+    expect(sqlHistStr).not.toContain('ILIKE');
+    expect(sqlHist.values).toContain('teixeira-de-freitas');
+  });
+
+  it('aplica cap de 50 pontos por produto no histórico (ROW_NUMBER por produto)', async () => {
+    mockQueryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    await repo.buscarStatsBatch(['arroz 5kg']);
+
+    const [, [sqlHist]] = mockQueryRaw.mock.calls as [
+      [{ strings: readonly string[]; values: unknown[] }],
+      [{ strings: readonly string[]; values: unknown[] }],
+    ];
+    const sqlStr = sqlHist.strings.join(' ');
+    expect(sqlStr).toContain('ROW_NUMBER()');
+    expect(sqlStr).toContain('PARTITION BY p.produto');
+    expect(sqlStr).toContain('rn <= 50');
+    expect(sqlStr).not.toMatch(/LIMIT\s+500/);
+  });
+
+  it('omite o filtro de cidade quando municipio não é informado', async () => {
+    mockQueryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    await repo.buscarStatsBatch(['arroz 5kg']);
+
+    const [[sqlAtual], [sqlHist]] = mockQueryRaw.mock.calls as [
+      [{ strings: readonly string[]; values: unknown[] }],
+      [{ strings: readonly string[]; values: unknown[] }],
+    ];
+    expect(sqlAtual.strings.join(' ')).not.toContain('cidade =');
+    expect(sqlHist.strings.join(' ')).not.toContain('cidade =');
+  });
+
+  it('monta ResumoPreco com tendência, sparkline e ehMinimoHistorico', async () => {
+    mockQueryRaw
+      .mockResolvedValueOnce([{ produto: 'arroz 5kg', precoMinAtual: 20 }])
+      .mockResolvedValueOnce([
+        { produto: 'arroz 5kg', preco: 30, dataColeta: new Date('2024-01-01') },
+        { produto: 'arroz 5kg', preco: 28, dataColeta: new Date('2024-01-05') },
+        { produto: 'arroz 5kg', preco: 25, dataColeta: new Date('2024-01-10') },
+        { produto: 'arroz 5kg', preco: 20, dataColeta: new Date('2024-01-15') },
+      ]);
+
+    const result = await repo.buscarStatsBatch(['arroz 5kg']);
+    const resumo = result.get('arroz 5kg');
+
+    expect(resumo).toBeDefined();
+    expect(resumo!.precoMinAtual).toBe(20);
+    expect(resumo!.precoMin30d).toBe(20);
+    expect(resumo!.ehMinimoHistorico).toBe(true);
+    expect(resumo!.tendencia).toBe('caindo');
+    expect(resumo!.sparkline).toHaveLength(4);
+  });
+});
