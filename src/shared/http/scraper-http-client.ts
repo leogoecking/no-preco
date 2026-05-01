@@ -7,6 +7,14 @@ const log = new Logger('ScraperHttpClient');
 
 const SESSION_TTL_MS = 25 * 60 * 1_000;
 
+/**
+ * Janela de silêncio após o alvo sinalizar bloqueio (429/403). Durante esse
+ * período qualquer chamada falha rápido sem tocar a rede — protege o IP de
+ * martelar um endpoint que já está negando acesso e devolve resposta imediata
+ * para o caller (front consegue mostrar mensagem amigável em vez de timeout).
+ */
+const COOLDOWN_BLOQUEIO_MS = 60 * 1_000;
+
 const USER_AGENTS: readonly string[] = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
@@ -72,6 +80,7 @@ function extrairCsrfDoHtml(html: string): string {
 export class ScraperHttpClient {
   private session: SessionState | null = null;
   private initInFlight: Promise<SessionState> | null = null;
+  private bloqueadoAte: number | null = null;
 
   constructor(
     private readonly baseUrl: string,
@@ -86,7 +95,32 @@ export class ScraperHttpClient {
     );
   }
 
+  private checarCooldown(): void {
+    if (this.bloqueadoAte === null) return;
+    const restante = this.bloqueadoAte - Date.now();
+    if (restante <= 0) {
+      this.bloqueadoAte = null;
+      return;
+    }
+    throw Object.assign(
+      new Error(`Cliente em cooldown após bloqueio (${Math.ceil(restante / 1000)}s restantes)`),
+      { tipo: 'BLOQUEIO_429' as ScraperError['tipo'] },
+    );
+  }
+
+  /**
+   * Marca o cliente como bloqueado pelos próximos `ms` milissegundos. Chamado
+   * pelo service quando detecta 429/403 (status HTTP ou body com codigo:429/403).
+   * Invalida sessão para que, ao sair do cooldown, refaça GET inicial limpo.
+   */
+  marcarBloqueio(ms: number = COOLDOWN_BLOQUEIO_MS): void {
+    this.bloqueadoAte = Date.now() + ms;
+    this.session = null;
+    log.warn('Cooldown ativado após bloqueio', { duracaoMs: ms });
+  }
+
   private async ensureSession(): Promise<SessionState> {
+    this.checarCooldown();
     if (this.isSessionValida()) return this.session as SessionState;
     if (this.initInFlight) return this.initInFlight;
 
@@ -149,6 +183,7 @@ export class ScraperHttpClient {
   }
 
   async post(body: string): Promise<HttpResponse> {
+    this.checarCooldown();
     const sess = await this.ensureSession();
     const url = this.baseUrl + this.endpoint;
 
@@ -220,4 +255,8 @@ export const scraperHttpClient = new ScraperHttpClient(BASE_URL, ENDPOINT);
 
 export function invalidateScraperHttpSession(): void {
   scraperHttpClient.invalidateSession();
+}
+
+export function marcarBloqueioScraperHttp(ms?: number): void {
+  scraperHttpClient.marcarBloqueio(ms);
 }

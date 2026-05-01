@@ -70,6 +70,7 @@ export function BuscaProduto() {
             placeholder="Nome do produto ou código de barras (EAN)"
             value={termo}
             onChange={(e) => setTermo(e.target.value)}
+            maxLength={100}
             className="pr-8"
           />
           {EAN_REGEX.test(termo) && (

@@ -8,6 +8,7 @@ import {
 import {
   scraperHttpClient,
   invalidateScraperHttpSession,
+  marcarBloqueioScraperHttp,
   HttpResponse,
   ProbeResult,
 } from '../../shared/http/scraper-http-client';
@@ -230,7 +231,7 @@ async function buscarViaHttp(params: BuscaParams): Promise<ProdutoPreco[]> {
   });
 
   if (resposta.status === 429 || resposta.status === 403) {
-    invalidateScraperHttpSession();
+    marcarBloqueioScraperHttp();
     const tipo: ScraperError['tipo'] = resposta.status === 429 ? 'BLOQUEIO_429' : 'BLOQUEIO_403';
     throw Object.assign(new Error(`Rate limit ${resposta.status} no POST de busca`), { tipo });
   }
@@ -256,7 +257,7 @@ async function buscarViaHttp(params: BuscaParams): Promise<ProdutoPreco[]> {
 
   const bloqueio = detectarBloqueioNoBody(dadosApi);
   if (bloqueio) {
-    invalidateScraperHttpSession();
+    marcarBloqueioScraperHttp();
     throw Object.assign(new Error(`Bloqueio embutido no body (codigo=${bloqueio.codigo})`), {
       tipo: bloqueio.tipo,
     });

@@ -6,8 +6,13 @@ jest.mock('../jobs/coleta.config', () => ({
     municipioPadrao: 'Salvador',
     delayMinMs: 0,
     delayMaxMs: 0,
-    cron: '0 * * * *',
-    produtos: [{ termo: 'arroz', label: 'Arroz 5kg', grupo: 0 }],
+    cron: '*/45 * * * *',
+    tarefasPorCiclo: 1,
+    produtos: [
+      { termo: 'arroz', label: 'Arroz 5kg' },
+      { termo: 'feijao', label: 'Feijão 1kg' },
+      { termo: 'cafe', label: 'Café 500g' },
+    ],
   },
 }));
 jest.mock('../modules/scraper/scraper.service', () => ({
@@ -147,6 +152,60 @@ describe('ColetaWorker', () => {
     it('não faz nada quando o worker não está em execução', () => {
       const worker = new ColetaWorker();
       expect(() => worker.abort()).not.toThrow();
+    });
+  });
+
+  describe('execute — modo cursor (default)', () => {
+    it('executa apenas tarefasPorCiclo tarefas por chamada', async () => {
+      mockBuscar.mockResolvedValue(resultadoComItens());
+      mockSalvar.mockResolvedValue(1);
+
+      const worker = new ColetaWorker();
+      const relatorio = await worker.execute();
+
+      // Mock tem 3 produtos × tarefasPorCiclo=1 → 1 tarefa por ciclo
+      expect(relatorio.totalTarefas).toBe(1);
+    });
+
+    it('avança o cursor a cada chamada e cobre produtos diferentes', async () => {
+      mockBuscar.mockResolvedValue(resultadoComItens());
+      mockSalvar.mockResolvedValue(1);
+
+      const worker = new ColetaWorker();
+      await worker.execute();
+      await worker.execute();
+      await worker.execute();
+
+      const termos = mockBuscar.mock.calls.map((c) => (c[0] as { termo: string }).termo);
+      expect(new Set(termos).size).toBe(3); // três termos distintos foram visitados
+    });
+
+    it('faz wrap-around no cursor após percorrer toda a lista', async () => {
+      mockBuscar.mockResolvedValue(resultadoComItens());
+      mockSalvar.mockResolvedValue(1);
+
+      const worker = new ColetaWorker();
+      await worker.execute();
+      await worker.execute();
+      await worker.execute();
+      await worker.execute(); // 4ª chamada deve voltar ao início
+
+      const calls = mockBuscar.mock.calls;
+      const termoPrimeiro = (calls[0]![0] as { termo: string }).termo;
+      const termoQuarto = (calls[3]![0] as { termo: string }).termo;
+      expect(termoQuarto).toBe(termoPrimeiro);
+    });
+  });
+
+  describe('execute — modo completo', () => {
+    it('executa toda a lista ignorando o cursor', async () => {
+      mockBuscar.mockResolvedValue(resultadoComItens());
+      mockSalvar.mockResolvedValue(1);
+
+      const worker = new ColetaWorker();
+      const relatorio = await worker.execute({ modo: 'completo' });
+
+      expect(relatorio.totalTarefas).toBe(3);
     });
   });
 });

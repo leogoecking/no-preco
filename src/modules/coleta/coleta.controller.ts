@@ -32,7 +32,7 @@ export async function disparar(req: Request, res: Response): Promise<void> {
   if (produto) {
     coletarProdutoEspecifico(produto, municipio);
   } else {
-    coletaWorker.execute().catch((err: Error) => {
+    coletaWorker.execute({ modo: 'completo' }).catch((err: Error) => {
       log.error('Erro no ciclo completo disparado manualmente', { erro: err.message });
     });
   }

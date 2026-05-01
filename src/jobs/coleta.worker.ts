@@ -4,8 +4,19 @@ import { ScraperError } from '../modules/scraper/scraper.types';
 import { coletaConfig, GrupoColeta, ProdutoMonitorado } from './coleta.config';
 import { Logger } from '../shared/logger/logger';
 
+/**
+ * Modos de seleção de tarefas:
+ * - `cursor` (default): pega `tarefasPorCiclo` tarefas a partir do cursor
+ *   circular interno e avança o cursor. Usado pelo scheduler distribuído.
+ * - `completo`: ignora cursor e executa toda a lista. Reservado para
+ *   disparos administrativos manuais (ex: backfill após manutenção).
+ */
+export type ModoExecucao = 'cursor' | 'completo';
+
 export interface ExecuteOptions {
-  /** Quando definido, executa apenas os produtos daquele grupo. */
+  /** Estratégia de seleção de tarefas (default: 'cursor'). */
+  modo?: ModoExecucao;
+  /** Filtra produtos por grupo legado. Quando definido, força modo='completo'. */
   grupo?: GrupoColeta;
 }
 
@@ -67,6 +78,13 @@ export class ColetaWorker {
   private isRunning = false;
   private lastReport: RelatorioColeta | null = null;
   private abortController = new AbortController();
+  /**
+   * Cursor circular sobre a lista expandida de tarefas. Avança a cada
+   * disparo do scheduler para distribuir a carga ao longo do dia. Estado
+   * in-memory: reset em restart só causa repetição de algumas tarefas no
+   * próximo dia, sem impacto funcional.
+   */
+  private cursorTarefa = 0;
 
   constructor() {
     this.log = new Logger('ColetaWorker');
@@ -112,12 +130,14 @@ export class ColetaWorker {
     this.isRunning = true;
 
     const inicio = new Date();
-    const tarefas = this.expandirTarefas(opts.grupo);
+    const modo: ModoExecucao = opts.grupo !== undefined ? 'completo' : (opts.modo ?? 'cursor');
+    const tarefas = this.selecionarTarefas(modo, opts.grupo);
     const resultados: ResultadoTarefa[] = [];
     let itensSalvos = 0;
 
     this.log.info('Ciclo iniciado', {
       tarefas: tarefas.length,
+      modo,
       municipioPadrao: coletaConfig.municipioPadrao,
       ...(opts.grupo !== undefined ? { grupo: opts.grupo } : {}),
     });
@@ -277,6 +297,28 @@ export class ColetaWorker {
     }
 
     return tarefas;
+  }
+
+  /**
+   * Aplica o modo de execução sobre a lista expandida.
+   * - `completo`: retorna tudo (uso administrativo / filtro por grupo).
+   * - `cursor`: retorna fatia circular de tamanho `tarefasPorCiclo` a partir
+   *   do cursor e avança o cursor. Quando o batch ultrapassa o fim da lista,
+   *   continua a partir do início (wrap-around).
+   */
+  private selecionarTarefas(modo: ModoExecucao, grupo?: GrupoColeta): TarefaColeta[] {
+    const todas = this.expandirTarefas(grupo);
+    if (todas.length === 0) return todas;
+    if (modo === 'completo') return todas;
+
+    const batch = Math.max(1, coletaConfig.tarefasPorCiclo);
+    const inicio = this.cursorTarefa % todas.length;
+    const fatia: TarefaColeta[] = [];
+    for (let i = 0; i < Math.min(batch, todas.length); i++) {
+      fatia.push(todas[(inicio + i) % todas.length] as TarefaColeta);
+    }
+    this.cursorTarefa = (inicio + fatia.length) % todas.length;
+    return fatia;
   }
 
   /**

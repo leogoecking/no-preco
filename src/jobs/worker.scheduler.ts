@@ -1,18 +1,17 @@
 import cron from 'node-cron';
 import { ColetaWorker, coletaWorker, RelatorioColeta, WorkerStatus } from './coleta.worker';
-import { GrupoColeta } from './coleta.config';
+import { coletaConfig } from './coleta.config';
 import { resetBrowserSession } from '../shared/http/browser-client';
 import { invalidateScraperHttpSession } from '../shared/http/scraper-http-client';
 import { Logger } from '../shared/logger/logger';
 
-const CRON_PADRAO = '0 */6 * * *'; // a cada 6 horas (00h, 06h, 12h, 18h)
 const TIMEZONE = 'America/Bahia';
-const JITTER_MAX_MS = 20 * 60 * 1_000; // até 20 min de atraso aleatório por ciclo
-
-/** Deriva o grupo rotativo a partir do horário UTC — cada 6h alterna entre 0 e 1. */
-function grupoDoHorario(agora: Date = new Date()): GrupoColeta {
-  return (Math.floor(agora.getUTCHours() / 6) % 2) as GrupoColeta;
-}
+/**
+ * Jitter aleatório aplicado antes de cada disparo. Mantido menor que o
+ * intervalo do cron para evitar sobreposição entre disparos consecutivos
+ * (cron padrão `*\/45` → jitter máx 10min ≈ 22% do intervalo).
+ */
+const JITTER_MAX_MS = 10 * 60 * 1_000;
 
 /**
  * Pausas progressivas do circuit breaker (ms).
@@ -53,7 +52,7 @@ export class WorkerScheduler {
   }
 
   /** Inicia o agendamento. Lança se a expressão cron for inválida. */
-  start(expressao: string = CRON_PADRAO): void {
+  start(expressao: string = coletaConfig.cron): void {
     if (this.task) {
       this.log.warn('Scheduler já iniciado — ignorando chamada duplicada');
       return;
@@ -170,11 +169,10 @@ export class WorkerScheduler {
       return;
     }
 
-    const grupo = grupoDoHorario();
-    this.log.info('Disparando ciclo de coleta', { grupo });
+    this.log.info('Disparando ciclo de coleta', { tarefasPorCiclo: coletaConfig.tarefasPorCiclo });
 
     this.worker
-      .execute({ grupo })
+      .execute()
       .then((relatorio) => this.avaliarCircuitBreaker(relatorio))
       .catch((err: Error) => {
         this.log.error('Erro não tratado no ciclo', { erro: err.message, stack: err.stack });
@@ -240,7 +238,7 @@ export const workerScheduler = new WorkerScheduler(coletaWorker);
 if (require.main === module) {
   (async (): Promise<void> => {
     const { connectDatabase } = await import('../shared/database/connection');
-    const cronExpr = process.env['COLETA_CRON'] ?? CRON_PADRAO;
+    const cronExpr = process.env['COLETA_CRON'] ?? coletaConfig.cron;
 
     const log = new Logger('standalone');
     log.info('Iniciando worker standalone', { cron: cronExpr });
